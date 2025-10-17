@@ -1,0 +1,3 @@
+mail.test.com 122.168.10.10 https 
+smtp.test.com 122.168.10.11 https 
+web.test.com 122.168.10.11 https 8443
