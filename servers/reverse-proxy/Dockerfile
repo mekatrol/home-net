@@ -35,6 +35,7 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y \
     curl \
     nginx-core \
     libnginx-mod-stream && \
+    certbot python3-certbot-nginx && \
     rm -rf /var/lib/apt/lists/*
 
 # Include modules-enabled at top if missing in file

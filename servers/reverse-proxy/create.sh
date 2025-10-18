@@ -82,4 +82,7 @@ docker run \
     --volume="$LETS_ENCRYPT_VOLUME" \
     "$IMAGE_NAME"
 
-printf 'Logs:      docker logs %q --tail=200\n' "$CONTAINER_NAME"
+printf 'Logs:         docker logs %q --tail=200\n' "$CONTAINER_NAME"
+printf 'Certs-dryrun: sudo certbot certonly --staging --dry-run --webroot --webroot-path=/var/www/html --email admin@%s --agree-tos --cert-name %s-rsa -d %s --key-type rsa\n' "$HOSTNAME" "$HOSTNAME" "$HOSTNAME"
+printf 'Certs-init:   certbot certonly --webroot --webroot-path=/var/www/html --email admin@%s --agree-tos --cert-name %s-rsa -d %s --key-type rsa\n' "$HOSTNAME" "$HOSTNAME" "$HOSTNAME"
+printf 'Certs-sched:  certbot renew --quiet && nginx -s reload\n'

@@ -32,8 +32,10 @@ RUN if [ -z "$CERTNAME" ]; then \
 
 # Base packages
 RUN apt-get update && apt-get install -y \
-    sudo syslog-ng nano tzdata openssh-server curl git jq nginx certbot python3-certbot-nginx && \
+    sudo syslog-ng-core syslog-ng-scl nano tzdata openssh-server curl git jq nginx certbot python3-certbot-nginx && \
     rm -rf /var/lib/apt/lists/*
+
+ENV HOSTNAME=${HOSTNAME} CERTNAME=${CERTNAME}
 
 # The ports to expose:
 #    80 - used by nginx for lets encrypt
@@ -56,19 +58,6 @@ RUN sed -i 's/system()/system(exclude-kmsg(yes))/g' /etc/syslog-ng/syslog-ng.con
 # Delete the NGINX default redirect
 RUN rm -f /etc/nginx/sites-enabled/default
 
-# Copy the reverse proxy configure shell script
-COPY configure_reverse_proxy.sh /configure_reverse_proxy.sh
-
-# Make shell script executable
-RUN chmod +x /configure_reverse_proxy.sh
-
-# Copy the reverse proxy definition file (strip Windows carriage returns if they exist)
-COPY reverse_proxy_list.txt /reverse_proxy_list.txt
-RUN sed -i 's/\r$//' /reverse_proxy_list.txt
-
-# Run the configuration script
-RUN /configure_reverse_proxy.sh
-
 # Create lets encrypt acme challenge
 RUN mkdir -p /var/www/html/.well-known/acme-challenge && echo ok | sudo tee /var/www/html/.well-known/acme-challenge/ping >/dev/null
 
@@ -76,12 +65,12 @@ RUN mkdir -p /var/www/html/.well-known/acme-challenge && echo ok | sudo tee /var
 RUN cat > /etc/nginx/sites-available/${HOSTNAME} <<EOF
 server {
     listen 80;
-    listen [::]:80;
-    server_name ${HOSTNAME};
+    server_name $HOSTNAME;
     root /var/www/html;
 
-    location / { index index.html; }
-    location /.well-known/acme-challenge/ { allow all; }
+    location / {
+        index index.html;
+    }
 }
 EOF
 
