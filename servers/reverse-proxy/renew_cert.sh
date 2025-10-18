@@ -2,7 +2,7 @@
 set -e
 
 # Usage:
-# DOMAIN=test.com SUBDOMAIN=sub SMTP_HOST=smtp.$DOMAIN FROM=proxy@$DOMAIN TO=certs@$DOMAIN TYPE="renew" ./renew_certs.sh
+# DOMAIN=test.com SUBDOMAIN=sub SMTP_HOST=smtp.$DOMAIN FROM=proxy@$DOMAIN TO=certs@$DOMAIN TYPE="renew" ./renew_cert.sh
 
 : "${DOMAIN:?DOMAIN not set}"
 : "${SUBDOMAIN:?SUBDOMAIN not set}"

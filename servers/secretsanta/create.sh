@@ -79,6 +79,7 @@ fi
 
 docker run \
     -itd --network="$NETWORK_NAME" \
+    --restart=always \
     --ip="$CONTAINER_IP_ADDR" \
     -p 8443:8443 \
     -p 80:80 \

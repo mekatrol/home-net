@@ -95,6 +95,7 @@ fi
 # ---- Run ----
 run_args=(
   -d
+  --restart always
   --name "$CONTAINER_NAME"
   --hostname "$HOSTNAME"
   --network "$NETWORK_NAME"

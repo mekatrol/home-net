@@ -76,6 +76,7 @@ fi
 
 docker run \
     -itd --network="$NETWORK_NAME" \
+    --restart=always \
     --ip="$CONTAINER_IP_ADDR" \
     --name="$CONTAINER_NAME" \
     --hostname="$CONTAINER_HOST_NAME" \

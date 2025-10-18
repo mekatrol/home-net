@@ -69,6 +69,12 @@ RUN rm -f /etc/nginx/sites-enabled/default
 COPY reverse_proxy_list.txt /reverse_proxy_list.txt
 RUN sed -i 's/\r$//' /reverse_proxy_list.txt
 
+# Copy the renew certificates shell script
+COPY renew_cert.sh /renew_cert.sh
+
+# Make shell script executable
+RUN chmod +x /renew_cert.sh
+
 # Copy the reverse proxy configure shell script
 COPY configure_reverse_proxy.sh /configure_reverse_proxy.sh
 
