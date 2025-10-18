@@ -132,14 +132,8 @@ server {
 
     # Keep ACME on the proxy host if you use http-01 challenges
     location ^~ /.well-known/acme-challenge/ {
-      proxy_pass http://scheduler.lan:80;
-      proxy_set_header Host \$host;
-      proxy_set_header X-Real-IP \$remote_addr;
-      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto \$scheme;
-
-      proxy_redirect off;
-      proxy_buffering off;
+        default_type text/plain;
+        try_files \$uri =404;
     }
 
     location / {

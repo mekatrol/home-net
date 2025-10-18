@@ -32,7 +32,7 @@ RUN if [ -z "$CERTNAME" ]; then \
 
 # Base packages
 RUN apt-get update && apt-get install -y \
-    sudo syslog-ng nano tzdata cron openssh-server curl git jq nginx certbot python3-certbot-nginx && \
+    sudo syslog-ng nano tzdata openssh-server curl git jq nginx certbot python3-certbot-nginx && \
     rm -rf /var/lib/apt/lists/*
 
 # The ports to expose:
@@ -40,17 +40,6 @@ RUN apt-get update && apt-get install -y \
 #   443 - used by nginx
 #  8443 - secretsanta site
 EXPOSE 443 80
-
-# Set up the cron job to renew certificates once per week
-# Use to generate in first instance:
-#   certbot certonly --webroot --webroot-path=/var/www/html --email admin@test.com --agree-tos --cert-name secretsanta.test.com-rsa -d secretsanta.test.com --key-type rsa
-RUN echo "5 0 */7 * * root certbot renew --quiet && nginx -s reload" > /etc/cron.d/certbot-renewal
-
-# Create a directory to store cron logs
-RUN mkdir -p /var/log/cron
-
-# Set cron job permissions, Owner = read/write | Group = read | Others = read
-RUN chmod 0644 /etc/cron.d/certbot-renewal
 
 # Create the SSH user and set a password
 RUN useradd -m -s /bin/bash $SSH_USER_NAME && echo "$SSH_USER_NAME:$SSH_USER_PASSWORD" | chpasswd
@@ -123,7 +112,6 @@ RUN cat > /start.sh <<'SH'
 set -euo pipefail
 
 service syslog-ng start
-service cron start
 service ssh start
 
 # If we have not yet fetched the certs, create self signed versions now so that nginx does not fail to load

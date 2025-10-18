@@ -42,7 +42,7 @@ NETWORK_NAME="docker-network"
 NETWORK_DRIVER="ipvlan"
 
 # The network interface card used for the network
-NETWORK_PARENT="br0"
+NETWORK_PARENT="eth0"
 
 # The network subnet
 NETWORK_SUBNET="10.2.2.0/24"
