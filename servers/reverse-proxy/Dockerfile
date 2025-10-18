@@ -34,7 +34,7 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y \
     openssh-server \
     curl \
     nginx-core \
-    libnginx-mod-stream && \
+    libnginx-mod-stream \
     certbot python3-certbot-nginx && \
     rm -rf /var/lib/apt/lists/*
 
@@ -69,11 +69,12 @@ RUN rm -f /etc/nginx/sites-enabled/default
 COPY reverse_proxy_list.txt /reverse_proxy_list.txt
 RUN sed -i 's/\r$//' /reverse_proxy_list.txt
 
-# Copy the renew certificates shell script
-COPY renew_cert.sh /renew_cert.sh
+# Copy the renew certificates shell scripts
+RUN mkdir -p /scripts
+COPY renew_cert.sh renew_certs.sh /scripts/
 
-# Make shell script executable
-RUN chmod +x /renew_cert.sh
+# Make shell scripts executable
+RUN chmod +x /scripts/renew_cert.sh && chmod +x /scripts/renew_certs.sh
 
 # Copy the reverse proxy configure shell script
 COPY configure_reverse_proxy.sh /configure_reverse_proxy.sh
@@ -93,9 +94,10 @@ service syslog-ng start
 ssh-keygen -A
 service ssh start
 /configure_reverse_proxy.sh
+
 nginx -t
-exec nginx -g 'daemon off;'
-tail -f /var/log/nginx/access.log
+nginx -g 'daemon off;' &
+/scripts/renew_certs.sh
 SH
 
 # Run container start up script

@@ -71,11 +71,11 @@ MSG_FILE="$(mktemp)"
   printf '\nCertbot exit code: %s\n' "$CERTBOT_STATUS"
 } > "$MSG_FILE"
 
-curl --url "smtp://${SMTP_HOST}:${SMTP_PORT}" \
+curl --silent --show-error \
+     --url "smtp://${SMTP_HOST}:${SMTP_PORT}" \
      --mail-from "$FROM" \
      --mail-rcpt "$TO" \
-     --upload-file "$MSG_FILE" \
-     --verbose
+     --upload-file "$MSG_FILE"
 
 rm -f "$MSG_FILE"
 echo "Email sent to $TO via $SMTP_HOST:$SMTP_PORT (no TLS). certbot exit code: $CERTBOT_STATUS"
