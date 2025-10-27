@@ -88,19 +88,19 @@ docker run \
 # Set web UI password
 docker exec -it "$CONTAINER_NAME" pihole setpassword "$WEBPASSWORD"
 
-# 1) Normalize and sort by hostname (column 2)
+# 1) Normalize and clean, sort by hostname
 tr -d '\r' < localdns.txt \
   | awk 'NF && $1 !~ /^#/' \
   | sort -k2,2 > localdns_sorted.txt
 
-# 2) Build array from the sorted file
+# 2) Build TOML array
 arr=$(
   awk '{printf "\"%s %s\",", $1, $2}' localdns_sorted.txt \
   | sed 's/,$//'
 )
 
-# 3) Apply to Pi-hole
-docker exec pihole sh -lc "pihole-FTL --config dns.hosts '[$arr]' && kill -HUP \$(pidof pihole-FTL)"
+# 3) Apply (no reload)
+docker exec pihole sh -lc "pihole-FTL --config dns.hosts '[$arr]'"
 
 # Restart to make sure list is loaded
 docker restart pihole
