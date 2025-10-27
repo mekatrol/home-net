@@ -61,10 +61,13 @@ fi
 
 if ! docker image ls --format '{{.Tag}}' | grep -q "^$IMAGE_NAME$"; then
     echo "Image '$IMAGE_NAME' does not exist. Creating it..."
+    sudo cp /etc/resolv.conf /etc/resolv.conf.bak
+    echo -e "nameserver 9.9.9.9\n" | sudo tee /etc/resolv.conf
     docker build -t "$IMAGE_NAME" \
         --build-arg HOSTNAME="$HOSTNAME" \
         --build-arg TIMEZONE="$TIMEZONE" \
         .
+    sudo mv /etc/resolv.conf.bak /etc/resolv.conf
 else
     echo "Image '$IMAGE_NAME' already exists."
 fi
