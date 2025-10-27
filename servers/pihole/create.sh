@@ -88,16 +88,31 @@ docker run \
 # Set web UI password
 docker exec -it "$CONTAINER_NAME" pihole setpassword "$WEBPASSWORD"
 
-# build array from localdns.txt (handles CRLF, skips blanks/comments)
-arr=$(tr -d '\r' < localdns.txt \
-  | awk 'NF && $1 !~ /^#/ {printf "\"%s %s\",", $1, $2}' \
-  | sed 's/,$//')
+# 1) Normalize and sort by hostname (column 2)
+tr -d '\r' < localdns.txt \
+  | awk 'NF && $1 !~ /^#/' \
+  | sort -k2,2 > localdns_sorted.txt
 
-# apply to Pi-hole v6 and reload FTL
+# 2) Build array from the sorted file
+arr=$(
+  awk '{printf "\"%s %s\",", $1, $2}' localdns_sorted.txt \
+  | sed 's/,$//'
+)
+
+# 3) Apply to Pi-hole
 docker exec pihole sh -lc "pihole-FTL --config dns.hosts '[$arr]' && kill -HUP \$(pidof pihole-FTL)"
 
 # Restart to make sure list is loaded
 docker restart pihole
 
+# Sleep for 5 seconds while restarting
+sleep 5
+
+# Print local DNS entries
+docker exec -it "$CONTAINER_NAME" cat /etc/pihole/hosts/custom.list
+
+printf '\n'
+printf '\n'
+printf '\n'
 printf 'Logs:      docker logs %q --tail=200\n' "$CONTAINER_NAME"
 printf 'Logs:      docker exec -it %q cat /etc/pihole/hosts/custom.list\n' "$CONTAINER_NAME"
