@@ -85,5 +85,19 @@ docker run \
     --volume="$DNSMASQ_VOLUME" \
     "$IMAGE_NAME"
 
+# Set web UI password
+docker exec -it "$CONTAINER_NAME" pihole setpassword "$WEBPASSWORD"
+
+# build array from localdns.txt (handles CRLF, skips blanks/comments)
+arr=$(tr -d '\r' < localdns.txt \
+  | awk 'NF && $1 !~ /^#/ {printf "\"%s %s\",", $1, $2}' \
+  | sed 's/,$//')
+
+# apply to Pi-hole v6 and reload FTL
+docker exec pihole sh -lc "pihole-FTL --config dns.hosts '[$arr]' && kill -HUP \$(pidof pihole-FTL)"
+
+# Restart to make sure list is loaded
+docker restart pihole
+
 printf 'Logs:      docker logs %q --tail=200\n' "$CONTAINER_NAME"
-printf 'Password:  docker exec -it %q %q setpassword %q\n' "$CONTAINER_NAME" "$CONTAINER_NAME" "$WEBPASSWORD"
+printf 'Logs:      docker exec -it %q cat /etc/pihole/hosts/custom.list\n' "$CONTAINER_NAME"
