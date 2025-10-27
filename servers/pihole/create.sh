@@ -41,7 +41,7 @@ NETWORK_SUBNET="10.2.2.0/24"
 NETWORK_GATEWAY="10.2.2.1"
 
 # Static IP address for the server host
-CONTAINER_IP_ADDR="10.2.2.202"
+CONTAINER_IP_ADDR="10.2.2.200"
 
 # PIHOLE volumes
 PIHOLE_VOLUME="/data/pihole-data:/etc/pihole"
