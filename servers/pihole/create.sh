@@ -43,29 +43,9 @@ NETWORK_GATEWAY="10.2.2.1"
 # Static IP address for the server host
 CONTAINER_IP_ADDR="10.2.2.200"
 
-# Static IP address for the vlan on host
-HOST_VLAN_IP_ADDR="10.2.2.203"
-
-# Name of host vlan
-HOST_VLAN_NAME="macvlan0"
-
 # PIHOLE volumes
 PIHOLE_VOLUME="/data/pihole-data:/etc/pihole"
 DNSMASQ_VOLUME="/data/pihole-dnsmasq.d:/etc/dnsmasq.d"
-
-# ensure macvlan shim exists and is configured
-if ! ip link show "$HOST_VLAN_NAME" >/dev/null 2>&1; then
-  sudo ip link add "$HOST_VLAN_NAME" link "$NETWORK_PARENT" type macvlan mode bridge
-fi
-
-# ensure correct IP on the shim
-if ! ip -o -4 addr show dev "$HOST_VLAN_NAME" | grep -q "\b$HOST_VLAN_IP_ADDR/24\b"; then
-  sudo ip addr flush dev "$HOST_VLAN_NAME"
-  sudo ip addr add "$HOST_VLAN_IP_ADDR/24" dev "$HOST_VLAN_NAME"
-fi
-
-# ensure it is up
-sudo ip link set "$HOST_VLAN_NAME" up
 
 # Make sure empty volumes exist
 rm -rf /data/pihole-data /data/pihole-dnsmasq.d
