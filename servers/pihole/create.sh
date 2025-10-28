@@ -115,4 +115,3 @@ printf '\n'
 printf '\n'
 printf 'Logs:      docker logs %q --tail=200\n' "$CONTAINER_NAME"
 printf 'Local DNS: docker exec -it %q cat /etc/pihole/hosts/custom.list\n' "$CONTAINER_NAME"
-printf 'VLAN:      ip link show %q\n' "$HOST_VLAN_NAME"
