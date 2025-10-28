@@ -29,7 +29,7 @@ CONTAINER_NAME="pihole"
 NETWORK_NAME="docker-network"
 
 # The driver method used when creating the network if it does not already exist
-NETWORK_DRIVER="ipvlan"
+NETWORK_DRIVER="macvlan"
 
 # The network interface card used for the network
 NETWORK_PARENT="enp3s0"
@@ -43,9 +43,29 @@ NETWORK_GATEWAY="10.2.2.1"
 # Static IP address for the server host
 CONTAINER_IP_ADDR="10.2.2.200"
 
+# Static IP address for the vlan on host
+HOST_VLAN_IP_ADDR="10.2.2.203"
+
+# Name of host vlan
+HOST_VLAN_NAME="macvlan0"
+
 # PIHOLE volumes
 PIHOLE_VOLUME="/data/pihole-data:/etc/pihole"
 DNSMASQ_VOLUME="/data/pihole-dnsmasq.d:/etc/dnsmasq.d"
+
+# ensure macvlan shim exists and is configured
+if ! ip link show "$HOST_VLAN_NAME" >/dev/null 2>&1; then
+  sudo ip link add "$HOST_VLAN_NAME" link "$NETWORK_PARENT" type macvlan mode bridge
+fi
+
+# ensure correct IP on the shim
+if ! ip -o -4 addr show dev "$HOST_VLAN_NAME" | grep -q "\b$HOST_VLAN_IP_ADDR/24\b"; then
+  sudo ip addr flush dev "$HOST_VLAN_NAME"
+  sudo ip addr add "$HOST_VLAN_IP_ADDR/24" dev "$HOST_VLAN_NAME"
+fi
+
+# ensure it is up
+sudo ip link set "$HOST_VLAN_NAME" up
 
 # Make sure empty volumes exist
 rm -rf /data/pihole-data /data/pihole-dnsmasq.d
@@ -54,20 +74,17 @@ mkdir -p /data/pihole-data /data/pihole-dnsmasq.d
 # Check if the network exists
 if ! docker network ls --format '{{.Name}}' | grep -q "^$NETWORK_NAME$"; then
     echo "Network '$NETWORK_NAME' does not exist. Creating it..."
-    docker network create --driver="$NETWORK_DRIVER" --subnet="$NETWORK_SUBNET" --gateway="$NETWORK_GATEWAY" -o parent="$NETWORK_PARENT" "$NETWORK_NAME"
+    docker network create --driver="$NETWORK_DRIVER" --subnet="$NETWORK_SUBNET" --gateway="$NETWORK_GATEWAY" -o parent="$NETWORK_PARENT" -o macvlan_mode=bridge "$NETWORK_NAME"
 else
     echo "Network '$NETWORK_NAME' already exists."
 fi
 
 if ! docker image ls --format '{{.Tag}}' | grep -q "^$IMAGE_NAME$"; then
     echo "Image '$IMAGE_NAME' does not exist. Creating it..."
-    sudo cp /etc/resolv.conf /etc/resolv.conf.bak
-    echo -e "nameserver 9.9.9.9\n" | sudo tee /etc/resolv.conf
     docker build -t "$IMAGE_NAME" \
         --build-arg HOSTNAME="$HOSTNAME" \
         --build-arg TIMEZONE="$TIMEZONE" \
         .
-    sudo mv /etc/resolv.conf.bak /etc/resolv.conf
 else
     echo "Image '$IMAGE_NAME' already exists."
 fi
@@ -76,7 +93,6 @@ docker run \
     -itd \
     --restart=always \
     --ip="$CONTAINER_IP_ADDR" \
-    -e WEBPASSWORD="$WEBPASSWORD" \
     -e DNSMASQ_LISTENING=all \
     -e PIHOLE_DNS_1=9.9.9.9 \
     -e FTLCONF_LOCAL_IPV4="$CONTAINER_IP_ADDR" \
@@ -118,4 +134,5 @@ printf '\n'
 printf '\n'
 printf '\n'
 printf 'Logs:      docker logs %q --tail=200\n' "$CONTAINER_NAME"
-printf 'Logs:      docker exec -it %q cat /etc/pihole/hosts/custom.list\n' "$CONTAINER_NAME"
+printf 'Local DNS: docker exec -it %q cat /etc/pihole/hosts/custom.list\n' "$CONTAINER_NAME"
+printf 'VLAN:      ip link show %q\n' "$HOST_VLAN_NAME"
