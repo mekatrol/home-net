@@ -75,6 +75,7 @@ fi
 docker run \
     -itd --network="$NETWORK_NAME" \
     --restart=unless-stopped \
+    --name="$CONTAINER_NAME" \
     --ip="$CONTAINER_IP_ADDR" \
     --name="$CONTAINER_NAME" \
     "$IMAGE_NAME"
