@@ -39,7 +39,7 @@ RUN useradd -m -s /bin/bash $SSH_USER_NAME && echo "$SSH_USER_NAME:$SSH_USER_PAS
 RUN usermod -aG sudo $SSH_USER_NAME
 
 # Create SSH run file directory
-RUN mkdir /var/run/sshd 
+RUN mkdir -p /var/run/sshd /home/$SSH_USER_NAME/repos
 
 # Exclude core messages in docker cotnainer
 RUN sed -i 's/system()/system(exclude-kmsg(yes))/g' /etc/syslog-ng/syslog-ng.conf
