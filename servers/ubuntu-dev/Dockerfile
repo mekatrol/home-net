@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y \
     sudo syslog-ng-core syslog-ng-scl nano tzdata openssh-server git supervisor python3-venv iputils-ping dnsutils && \
     rm -rf /var/lib/apt/lists/*
 
-ENV HOSTNAME=${HOSTNAME} 
+ENV HOSTNAME=${HOSTNAME} SSH_USER_NAME=${SSH_USER_NAME}
 
 # Create the SSH user and set a password
 RUN useradd -m -U -s /bin/bash $SSH_USER_NAME && echo "$SSH_USER_NAME:$SSH_USER_PASSWORD" | chpasswd
@@ -44,10 +44,13 @@ RUN usermod -aG sudo $SSH_USER_NAME
 # Create SSH run file directory
 RUN mkdir -p /var/run/sshd /home/$SSH_USER_NAME/repos && chown -R $SSH_USER_NAME:$SSH_USER_NAME /home/$SSH_USER_NAME/repos
 
-RUN git config --global user.name "Mekatrol" && git config --global user.email git@mekatrol.com
-
 # Clone repo
 RUN git clone https://github.com/mekatrol/home-monitor.git /home/$SSH_USER_NAME/repos/home-monitor
+
+# Configure GIT
+RUN git config --global user.name "Mekatrol" && \
+    git config --global user.email git@mekatrol.com && \
+    git config --global --add safe.directory /home/$SSH_USER_NAME/repos/home-monitor
 
 # App user and dir
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin monitoruser \
@@ -87,6 +90,8 @@ RUN cat > /start.sh <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 
+: "${SSH_USER_NAME:?SSH_USER_NAME env not set}"
+
 service syslog-ng start
 service ssh start
 
@@ -96,6 +101,8 @@ sleep 1
 supervisorctl reread
 supervisorctl update
 supervisorctl status monitor
+
+sudo -u "$SSH_USER_NAME" bash -lc 'cd ~/repos/home-monitor && git pull || true'
 
 exec tail -f /var/log/syslog
 SH
