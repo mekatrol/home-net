@@ -27,7 +27,7 @@ RUN if [ -z "$TIMEZONE" ]; then \
 
 # Base packages
 RUN apt-get update && apt-get install -y \
-    sudo syslog-ng-core syslog-ng-scl nano tzdata openssh-server && \
+    sudo syslog-ng-core syslog-ng-scl nano tzdata openssh-server git && \
     rm -rf /var/lib/apt/lists/*
 
 ENV HOSTNAME=${HOSTNAME} 
