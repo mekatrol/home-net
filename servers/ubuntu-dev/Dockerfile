@@ -47,10 +47,24 @@ RUN mkdir -p /var/run/sshd /home/$SSH_USER_NAME/repos
 # Clone repo and take ownership for SSH user
 RUN git clone https://github.com/mekatrol/home-monitor.git /home/$SSH_USER_NAME/repos/home-monitor && chown -R $SSH_USER_NAME:$SSH_USER_NAME /home/$SSH_USER_NAME/repos 
 
+# Ensure ownership first
+RUN chown -R ${SSH_USER_NAME}:${SSH_USER_NAME} /home/${SSH_USER_NAME}
+
+# Build deps as the SSH user
+WORKDIR /home/${SSH_USER_NAME}/repos/home-monitor
+USER ${SSH_USER_NAME}
+ENV HOME=/home/${SSH_USER_NAME}
+
 # Configure GIT
-RUN git config --global user.name "Mekatrol" && \
-    git config --global user.email git@mekatrol.com && \
-    git config --global --add safe.directory /home/$SSH_USER_NAME/repos/home-monitor
+RUN git config --local user.name "Mekatrol" && \
+    git config --local user.email git@mekatrol.com && \
+    git config --global --add safe.directory /home/${SSH_USER_NAME}/repos/home-monitor && \
+    python3 -m venv .venv && \
+    .venv/bin/python -m pip install --upgrade pip && \
+    .venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Return to root user
+USER root
 
 # App user and dir
 RUN useradd --system --no-create-home --shell /usr/sbin/nologin monitoruser \
