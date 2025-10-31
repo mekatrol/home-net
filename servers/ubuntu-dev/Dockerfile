@@ -30,7 +30,7 @@ RUN if [ -z "$TIMEZONE" ]; then \
 
 # Base packages
 RUN apt-get update && apt-get install -y \
-    sudo syslog-ng-core syslog-ng-scl nano tzdata openssh-server git supervisor python3-venv && \
+    sudo syslog-ng-core syslog-ng-scl nano tzdata openssh-server git supervisor python3-venv iputils-ping dnsutils && \
     rm -rf /var/lib/apt/lists/*
 
 ENV HOSTNAME=${HOSTNAME} 
