@@ -126,6 +126,12 @@ supervisorctl reread
 supervisorctl update
 supervisorctl status monitor
 
+# Can stop/start/restart:
+# supervisorctl stop monitor
+# supervisorctl start monitor
+# supervisorctl restart monitor
+# supervisorctl stop all
+
 sudo -u "$SSH_USER_NAME" bash -lc 'cd ~/repos/home-monitor && git pull || true'
 
 exec tail -f /var/log/syslog
