@@ -24,7 +24,6 @@ if [ -z "$TIMEZONE" ]; then
     exit 1
 fi
 
-
 # The name of the image that will be created with 'docker build'
 IMAGE_NAME="ubuntu-dev"
 
@@ -77,7 +76,7 @@ docker run \
     --restart=unless-stopped \
     --name="$CONTAINER_NAME" \
     --ip="$CONTAINER_IP_ADDR" \
-    --name="$CONTAINER_NAME" \
+    --hostname="$HOSTNAME" \
     "$IMAGE_NAME"
 
 printf 'Logs:      docker logs %q --tail=200\n' "$CONTAINER_NAME"
