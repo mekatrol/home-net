@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # e.g. to run this script:
-# SSH_USER_NAME="ssh" SSH_USER_PASSWORD="pwd" HOSTNAME="dev.lan" DNSHOST="9.9.9.9" TIMEZONE="Australia/Sydney" ./create.sh
+# SSH_USER_NAME="ssh" SSH_USER_PASSWORD="pwd" GIT_USER_NAME="git" GIT_DOMAIN="example.com" HOSTNAME="dev.lan" DNSHOST="9.9.9.9" TIMEZONE="Australia/Sydney" ./create.sh
 
 if [ -z "$SSH_USER_NAME" ]; then
     echo "Error: SSH_USER_NAME must be defined!"
@@ -11,6 +11,16 @@ fi
 
 if [ -z "$SSH_USER_PASSWORD" ]; then
     echo "Error: SSH_USER_PASSWORD must be defined!"
+    exit 1
+fi
+
+if [ -z "$GIT_USER_NAME" ]; then
+    echo "Error: GIT_USER_NAME must be defined!"
+    exit 1
+fi
+
+if [ -z "$GIT_DOMAIN" ]; then
+    echo "Error: GIT_DOMAIN must be defined!"
     exit 1
 fi
 
@@ -69,6 +79,8 @@ if ! docker image ls --format '{{.Tag}}' | grep -q "^$IMAGE_NAME$"; then
     docker build -t "$IMAGE_NAME" \
         --build-arg SSH_USER_NAME="$SSH_USER_NAME" \
         --build-arg SSH_USER_PASSWORD="$SSH_USER_PASSWORD" \
+        --build-arg GIT_USER_NAME="$GIT_USER_NAME" \
+        --build-arg GIT_DOMAIN="$GIT_DOMAIN" \
         --build-arg HOSTNAME="$HOSTNAME" \
         --build-arg TIMEZONE="$TIMEZONE" \
         .

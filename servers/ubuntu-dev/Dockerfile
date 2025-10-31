@@ -9,6 +9,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # Expected arguments
 ARG SSH_USER_NAME
 ARG SSH_USER_PASSWORD
+ARG GIT_USER_NAME
+ARG GIT_DOMAIN
 ARG HOSTNAME
 ARG TIMEZONE
 
@@ -18,6 +20,14 @@ RUN if [ -z "$SSH_USER_NAME" ]; then \
 
 RUN if [ -z "$SSH_USER_PASSWORD" ]; then \
     echo "Error: SSH_USER_PASSWORD must be defined!" && exit 1; \
+    fi
+
+RUN if [ -z "$GIT_USER_NAME" ]; then \
+    echo "Error: GIT_USER_NAME must be defined!" && exit 1; \
+    fi
+
+RUN if [ -z "$GIT_DOMAIN" ]; then \
+    echo "Error: GIT_DOMAIN must be defined!" && exit 1; \
     fi
 
 RUN if [ -z "$HOSTNAME" ]; then \
@@ -56,9 +66,9 @@ USER ${SSH_USER_NAME}
 ENV HOME=/home/${SSH_USER_NAME}
 
 # Configure GIT
-RUN git config --local user.name "Mekatrol" && \
-    git config --local user.email git@mekatrol.com && \
-    git config --global --add safe.directory /home/${SSH_USER_NAME}/repos/home-monitor && \
+RUN git config --local user.name "${GIT_USER_NAME}" && \
+    git config --local user.email "${GIT_USER_NAME}@${GIT_DOMAIN}" && \
+    git config --global --add safe.directory "/home/${SSH_USER_NAME}/repos/home-monitor" && \
     python3 -m venv .venv && \
     .venv/bin/python -m pip install --upgrade pip && \
     .venv/bin/pip install --no-cache-dir -r requirements.txt
