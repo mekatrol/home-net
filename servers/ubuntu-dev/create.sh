@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # e.g. to run this script:
-# SSH_USER_NAME="ssh" SSH_USER_PASSWORD="pwd" HOSTNAME="dev.lan" TIMEZONE="Australia/Sydney" ./create.sh
+# SSH_USER_NAME="ssh" SSH_USER_PASSWORD="pwd" HOSTNAME="dev.lan" DNSHOST="9.9.9.9" TIMEZONE="Australia/Sydney" ./create.sh
 
 if [ -z "$SSH_USER_NAME" ]; then
     echo "Error: SSH_USER_NAME must be defined!"
@@ -21,6 +21,11 @@ fi
 
 if [ -z "$TIMEZONE" ]; then
     echo "Error: TIMEZONE must be defined!"
+    exit 1
+fi
+
+if [ -z "$DNSHOST" ]; then
+    echo "Error: DNSHOST must be defined!"
     exit 1
 fi
 
@@ -77,6 +82,7 @@ docker run \
     --name="$CONTAINER_NAME" \
     --ip="$CONTAINER_IP_ADDR" \
     --hostname="$HOSTNAME" \
+    --dns $DNSHOST \
     "$IMAGE_NAME"
 
 printf 'Logs:      docker logs %q --tail=200\n' "$CONTAINER_NAME"

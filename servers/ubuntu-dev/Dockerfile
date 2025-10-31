@@ -44,6 +44,8 @@ RUN usermod -aG sudo $SSH_USER_NAME
 # Create SSH run file directory
 RUN mkdir -p /var/run/sshd /home/$SSH_USER_NAME/repos && chown -R $SSH_USER_NAME:$SSH_USER_NAME /home/$SSH_USER_NAME/repos
 
+RUN git config --global user.name "Mekatrol" && git config --global user.email git@mekatrol.com
+
 # Clone repo
 RUN git clone https://github.com/mekatrol/home-monitor.git /home/$SSH_USER_NAME/repos/home-monitor
 
