@@ -42,10 +42,10 @@ RUN useradd -m -U -s /bin/bash $SSH_USER_NAME && echo "$SSH_USER_NAME:$SSH_USER_
 RUN usermod -aG sudo $SSH_USER_NAME
 
 # Create SSH run file directory
-RUN mkdir -p /var/run/sshd /home/$SSH_USER_NAME/repos && chown -R $SSH_USER_NAME:$SSH_USER_NAME /home/$SSH_USER_NAME/repos
+RUN mkdir -p /var/run/sshd /home/$SSH_USER_NAME/repos 
 
-# Clone repo
-RUN git clone https://github.com/mekatrol/home-monitor.git /home/$SSH_USER_NAME/repos/home-monitor
+# Clone repo and take ownership for SSH user
+RUN git clone https://github.com/mekatrol/home-monitor.git /home/$SSH_USER_NAME/repos/home-monitor && chown -R $SSH_USER_NAME:$SSH_USER_NAME /home/$SSH_USER_NAME/repos 
 
 # Configure GIT
 RUN git config --global user.name "Mekatrol" && \
