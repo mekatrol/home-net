@@ -32,7 +32,7 @@ RUN if [ -z "$CERTNAME" ]; then \
 
 # Base packages
 RUN apt-get update && apt-get install -y \
-    sudo syslog-ng nano tzdata cron openssh-server curl git jq nginx certbot python3-certbot-nginx
+    sudo syslog-ng nano tzdata openssh-server curl git jq nginx certbot python3-certbot-nginx
 
 # Node.js 20
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
@@ -77,23 +77,6 @@ RUN ORIGINS_JSON="$(jq -R -s '[split("\n")[] | gsub("^\\s+|\\s+$";"") | select(l
     /opt/secretsanta/published/appsettings.json \
     > /tmp/appsettings.json \
     && mv /tmp/appsettings.json /opt/secretsanta/published/appsettings.json
-
-# The ports to expose:
-#    80 - used by nginx for lets encrypt
-#   443 - used by nginx
-#  8443 - secretsanta site
-EXPOSE 443 80 8443
-
-# Set up the cron job to renew certificates once per week
-# Use to generate in first instance:
-#   certbot certonly --webroot --webroot-path=/var/www/html --email admin@test.com --agree-tos --cert-name secretsanta.test.com-rsa -d secretsanta.test.com --key-type rsa
-RUN echo "5 0 */7 * * root certbot renew --quiet && nginx -s reload" > /etc/cron.d/certbot-renewal
-
-# Create a directory to store cron logs
-RUN mkdir -p /var/log/cron
-
-# Set cron job permissions, Owner = read/write | Group = read | Others = read
-RUN chmod 0644 /etc/cron.d/certbot-renewal
 
 # Create the SSH user and set a password
 RUN useradd -m -s /bin/bash $SSH_USER_NAME && echo "$SSH_USER_NAME:$SSH_USER_PASSWORD" | chpasswd
@@ -156,7 +139,7 @@ RUN nginx -t
 
 # Create index.html just for testing site up and running
 RUN install -d -m 755 /var/www/html && \
-    cat > /var/www/html/index.html <<'EOF'
+cat > /var/www/html/index.html <<'EOF'
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>OK</title></head>
@@ -176,7 +159,6 @@ RUN cat > /start.sh <<'SH'
 set -euo pipefail
 
 service syslog-ng start
-service cron start
 service ssh start
 
 # start app in background, log to file
