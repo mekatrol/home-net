@@ -6,6 +6,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 
+# Run as pi user
+User=pi
+
 # Project directory
 WorkingDirectory=/home/pi/nas
 
