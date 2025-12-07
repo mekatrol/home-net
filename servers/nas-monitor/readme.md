@@ -1,8 +1,10 @@
 
-### Copy files to remote server
+### Copy files to remote server 
+> assumes is being executed from repo 'home-net' root directory  
+
 ```bash
 ssh pi@monitor.lan "mkdir -p /home/pi/nas"
-scp -r ./home-net/servers/nas-monitor/nas* pi@monitor.lan:/home/pi/nas/ 
+scp -r ./servers/nas-monitor/nas* pi@monitor.lan:/home/pi/nas/ 
 ```
 
 ### Run on remote server
@@ -22,6 +24,15 @@ nano ~/nas/nas-monitor.conf
 ```bash
 ssh-keygen -t ed25519
 ssh-copy-id admin@nas.lan
+```
+
+### Create .venv
+```bash
+sudo apt update
+sudo apt install python3.13-venv -y
+cd ~/nas
+python3 -m venv .venv
+cd ~/
 ```
 
 ### Enable and start service

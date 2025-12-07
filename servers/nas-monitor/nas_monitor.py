@@ -393,7 +393,6 @@ def wait_for_power_stability(cfg: Dict[str, Any]) -> None:
 
         # Sleep with a 1-second countdown until the next power check
         for sec in range(interval, 0, -1):
-            logger.info("Next power check in %ss", sec)
             time.sleep(1)
 
 
