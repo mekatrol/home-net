@@ -1,3 +1,6 @@
+# UPS Montioring
+
+## Monitor set up
 
 ### Copy files to remote server 
 > assumes is being executed from repo 'home-net' root directory  
@@ -5,6 +8,7 @@
 ```bash
 ssh pi@monitor.lan "mkdir -p /home/pi/nas"
 scp -r ./servers/nas-monitor/nas* pi@monitor.lan:/home/pi/nas/ 
+scp -r ./servers/nas-monitor/ups* pi@monitor.lan:/home/pi/nas/ 
 ```
 
 ### Run on remote server
@@ -46,4 +50,25 @@ sudo systemctl start nas-monitor.service
 ```bash
 journalctl -u nas-monitor.service -f
 tail -f /var/log/nas-monitor.log
+```
+
+## UPS intrface set up
+
+### Check for USB
+
+```bash
+lsusb
+```
+
+> You should see something like  
+`Bus 001 Device 004: ID 0001:0000 Fry's Electronics MEC0003`
+
+### Install python USB
+```bash
+sudo apt install python3-usb
+```
+
+### Run script
+```bash
+sudo python3 ups_monitor.py
 ```
