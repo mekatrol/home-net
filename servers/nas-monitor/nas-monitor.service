@@ -1,0 +1,21 @@
+[Unit]
+Description=Start Unraid array after power is stable
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Project directory
+WorkingDirectory=/home/pi/nas
+
+# Run using virtual environment’s Python interpreter and environment variables
+ExecStart=/home/pi/nas/.venv/bin/python /home/pi/nas/nas_monitor.py
+EnvironmentFile=/home/pi/nas/.venv/environment
+
+# Restart behaviour
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
