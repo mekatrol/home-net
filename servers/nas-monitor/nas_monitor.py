@@ -1101,8 +1101,8 @@ def main_control_loop(
     # Track cumulative mains + voltage stability time
     stable_mains_time: float = 0.0
 
-    # Accumulator for periodic Unraid status checks
-    status_timer: float = 0.0
+    # Wall-clock timestamp of last Unraid status check
+    last_status_check_ts: float = time.time()
 
     # When we last attempted to start the array (so we don't hammer it)
     last_start_attempt_ts: float = 0.0
@@ -1270,11 +1270,10 @@ def main_control_loop(
         # -------------------------------------------------------------------
         # Periodic Unraid status check (independent from UPS logic)
         # -------------------------------------------------------------------
-        elapsed = time.time() - loop_start
-        status_timer += elapsed
+        now = time.time()
+        if now - last_status_check_ts >= status_check_interval:
+            last_status_check_ts = now
 
-        if status_timer >= status_check_interval:
-            status_timer = 0.0
             started, raw = get_array_status(cfg)
             if started:
                 logger.info("Periodic check: Unraid array is STARTED.")
@@ -1286,11 +1285,6 @@ def main_control_loop(
 
             # Publish current array state to MQTT (if enabled).
             publish_array_status(cfg, mqtt_client, started, raw)
-
-            # Optional: when array is confirmed STARTED while mains+voltage
-            # are good, we could clear per-outage flags if desired. For now,
-            # those flags are informational; the array start behavior does
-            # not depend on them.
 
         # Sleep so that loop timing approximates ups_poll_interval
         sleep_time = max(0.0, ups_poll_interval - (time.time() - loop_start))
