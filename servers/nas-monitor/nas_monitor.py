@@ -60,11 +60,21 @@ import time
 import subprocess
 import logging
 from logging.handlers import RotatingFileHandler
-from typing import Dict, Tuple, Any, List, Union, Optional
+from typing import Dict, Tuple, Any, List, Union, Optional, TYPE_CHECKING
 
 import usb.core
 import usb.util
 import re
+import json
+
+if TYPE_CHECKING:
+    import paho.mqtt.client as mqtt
+
+# Runtime import for MQTT – this actually defines `mqtt` when running.
+try:
+    import paho.mqtt.client as mqtt  # type: ignore[import]
+except ImportError:
+    mqtt = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Paths / logger
@@ -217,6 +227,15 @@ def load_config(path: str) -> Dict[str, Any]:
         "ups_timeout_ms": 5000,
         "ups_poll_interval": 2,
         "silence_beeper": True,
+        # MQTT defaults
+        "mqtt_enabled": False,
+        "mqtt_host": "127.0.0.1",
+        "mqtt_port": 1883,
+        "mqtt_keepalive": 30,
+        "mqtt_username": "",
+        "mqtt_password": "",
+        "mqtt_tls": False,
+        "mqtt_base_topic": "home/nas",
     }
 
     if not os.path.exists(path):
@@ -228,9 +247,11 @@ def load_config(path: str) -> Dict[str, Any]:
         "status_check_interval",
         "ups_timeout_ms",
         "ups_poll_interval",
+        "mqtt_port",
+        "mqtt_keepalive",
     }
     float_keys = {"low_batt_volt", "extra_low_batt_volt", "enable_array_voltage"}
-    bool_keys = {"silence_beeper"}
+    bool_keys = {"silence_beeper", "mqtt_enabled", "mqtt_tls"}
 
     try:
         with open(path, "r") as f:
@@ -401,6 +422,180 @@ def run_ssh_command(cfg: Dict[str, Any], remote_cmd: str) -> Tuple[int, str, str
 
     logger.info("SSH EXIT CODE: %d", rc)
     return rc, out, err
+
+
+# ---------------------------------------------------------------------------
+# MQTT publishing helpers
+# ---------------------------------------------------------------------------
+
+
+def setup_mqtt(cfg: Dict[str, Any]) -> Optional["mqtt.Client"]:
+    """
+    Initialise a persistent MQTT client if MQTT is enabled and paho-mqtt
+    is installed. The client connection is kept open and used to publish
+    UPS and Unraid array status messages.
+
+    Behavior:
+        - If cfg['mqtt_enabled'] is false, logs and returns None.
+        - If paho-mqtt is not installed, logs and returns None.
+        - Otherwise:
+            * Creates a client
+            * Applies optional username/password auth
+            * Optionally enables basic TLS
+            * Connects to the broker
+            * Starts the network loop (loop_start) in a background thread
+
+    Returns:
+        mqtt.Client instance, or None if MQTT is effectively disabled.
+    """
+    if not cfg.get("mqtt_enabled", False):
+        logger.info("MQTT disabled by configuration (mqtt_enabled=false).")
+        return None
+
+    if mqtt is None:
+        logger.error(
+            "MQTT requested but paho-mqtt is not installed. "
+            "Run 'pip install paho-mqtt' or disable mqtt_enabled."
+        )
+        return None
+
+    host = str(cfg.get("mqtt_host", "127.0.0.1"))
+    port = int(cfg.get("mqtt_port", 1883))
+    keepalive = int(cfg.get("mqtt_keepalive", 30))
+    username = str(cfg.get("mqtt_username") or "") or None
+    password = str(cfg.get("mqtt_password") or "") or None
+    use_tls = bool(cfg.get("mqtt_tls", False))
+
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # type: ignore[call-arg]
+
+    # Optional authentication
+    if username is not None:
+        client.username_pw_set(username, password)
+
+    # Optional TLS (basic system CA usage)
+    if use_tls:
+        logger.info("Enabling TLS for MQTT connection.")
+        client.tls_set()
+
+    logger.info(
+        "Connecting to MQTT broker %s:%d (keepalive=%d, tls=%s)...",
+        host,
+        port,
+        keepalive,
+        use_tls,
+    )
+
+    try:
+        client.connect(host, port, keepalive)
+        # Use a background thread for MQTT network handling; this keeps
+        # the main loop simple and synchronous.
+        client.loop_start()
+    except Exception as e:
+        logger.error("Failed to connect to MQTT broker: %s", e)
+        return None
+
+    logger.info("MQTT connection established successfully.")
+    return client
+
+
+def _mqtt_topic(cfg: Dict[str, Any], suffix: str) -> str:
+    """
+    Build a concrete MQTT topic by appending a suffix to the configured
+    base topic.
+
+    Example:
+        base: "home/nas"
+        suffix: "ups"
+        -> "home/nas/ups"
+    """
+    base = str(cfg.get("mqtt_base_topic", "home/nas")).rstrip("/")
+    return f"{base}/{suffix}"
+
+
+def publish_ups_status(
+    cfg: Dict[str, Any],
+    client: Optional["mqtt.Client"],
+    status: Dict[str, Any],
+) -> None:
+    """
+    Publish a single UPS status sample to MQTT.
+
+    Topic:
+        <mqtt_base_topic>/ups
+
+    Payload (JSON object), for example:
+        {
+          "time": 1710001234,
+          "input_voltage": 230.1,
+          "output_voltage": 228.5,
+          "load_percent": 23,
+          "battery_voltage": 25.1,
+          "temperature_c": 28.0,
+          "on_battery": false,
+          "battery_low": false,
+          "flags_raw": "01000011"
+        }
+    """
+    if client is None:
+        return
+
+    topic = _mqtt_topic(cfg, "ups")
+    payload = {
+        "time": int(time.time()),
+        "input_voltage": status.get("input_voltage"),
+        "output_voltage": status.get("output_voltage"),
+        "load_percent": status.get("load_percent"),
+        "battery_voltage": status.get("battery_voltage"),
+        "temperature_c": status.get("temperature_c"),
+        "on_battery": bool(status.get("on_battery")),
+        "battery_low": bool(status.get("battery_low")),
+        "flags_raw": status.get("flags_raw"),
+    }
+
+    try:
+        client.publish(topic, json.dumps(payload), qos=0, retain=False)
+        logger.info("Published UPS status to MQTT topic '%s'.", topic)
+    except Exception as e:
+        logger.warning("Failed to publish UPS status to MQTT: %s", e)
+
+
+def publish_array_status(
+    cfg: Dict[str, Any],
+    client: Optional["mqtt.Client"],
+    started: bool,
+    raw_status: str,
+) -> None:
+    """
+    Publish the current Unraid array status to MQTT.
+
+    Topic:
+        <mqtt_base_topic>/array
+
+    Payload (JSON object), for example:
+        {
+          "time": 1710001234,
+          "started": true,
+          "raw_status": "mdState=STARTED\narrayStarted=\"yes\"..."
+        }
+
+    The 'raw_status' field is the combined lines from var.ini that were
+    already obtained by get_array_status().
+    """
+    if client is None:
+        return
+
+    topic = _mqtt_topic(cfg, "array")
+    payload = {
+        "time": int(time.time()),
+        "started": bool(started),
+        "raw_status": raw_status,
+    }
+
+    try:
+        client.publish(topic, json.dumps(payload), qos=0, retain=False)
+        logger.info("Published array status to MQTT topic '%s'.", topic)
+    except Exception as e:
+        logger.warning("Failed to publish array status to MQTT: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -858,7 +1053,9 @@ def read_ups_status(cfg: Dict[str, Any], dev: usb.core.Device) -> Dict[str, Any]
 # ---------------------------------------------------------------------------
 
 
-def main_control_loop(cfg: Dict[str, Any]) -> None:
+def main_control_loop(
+    cfg: Dict[str, Any], mqtt_client: Optional["mqtt.Client"]
+) -> None:
     """
     Main hybrid loop that:
 
@@ -933,6 +1130,10 @@ def main_control_loop(cfg: Dict[str, Any]) -> None:
         # Attempt to read UPS status
         try:
             status = read_ups_status(cfg, dev)
+
+            # Publish each UPS sample to MQTT (if enabled).
+            publish_ups_status(cfg, mqtt_client, status)
+
         except Exception as e:
             logger.error("Error querying UPS: %s", e)
             logger.info("Releasing UPS handle and retrying discovery next loop")
@@ -1083,6 +1284,9 @@ def main_control_loop(cfg: Dict[str, Any]) -> None:
             if raw:
                 logger.info("Unraid raw status output:\n%s", raw)
 
+            # Publish current array state to MQTT (if enabled).
+            publish_array_status(cfg, mqtt_client, started, raw)
+
             # Optional: when array is confirmed STARTED while mains+voltage
             # are good, we could clear per-outage flags if desired. For now,
             # those flags are informational; the array start behavior does
@@ -1123,12 +1327,24 @@ def main() -> None:
         logger.error("host and/or user not set in config, exiting.")
         return
 
+    # Initialise MQTT (if enabled and available). The returned client will
+    # be used for all subsequent UPS/array status publishes.
+    mqtt_client = setup_mqtt(cfg)
+
     try:
-        main_control_loop(cfg)
+        main_control_loop(cfg, mqtt_client)
     except KeyboardInterrupt:
         logger.info("Received KeyboardInterrupt; exiting.")
     except Exception as e:
         logger.exception("Unhandled exception in main_control_loop: %s", e)
+    finally:
+        # Cleanly stop MQTT network loop if it was started.
+        if mqtt_client is not None:
+            try:
+                mqtt_client.loop_stop()
+                mqtt_client.disconnect()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
