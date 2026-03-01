@@ -11,9 +11,20 @@ apt update && apt upgrade -y
 ## Set host name to fqdns
 
 Update the following files to FQDN hostname and then reboot
+(change <fqdn> to your mail server fully qualified domain name)
 
+* `sudo hostnamectl set-hostname <fqdn>`
 * `nano /etc/hostname`
 * `nano /etc/hosts`
+
+On some VPS hosting (such as Hostnger) they change /etc/hosts at boot to insert the FQDN they assign.
+We can force them to stop doing that (as a reverse IP lookup may server that name) by locking hosts file:
+
+* `sudo chattr +i /etc/hosts`
+
+This can later be undone for edit by:
+
+* `sudo chattr -i /etc/hosts`
 
 Reboot server
 
@@ -409,4 +420,5 @@ namespace SendMail
         }
     }
 }
+
 ```
