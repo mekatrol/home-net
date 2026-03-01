@@ -159,6 +159,17 @@ sudo cp /etc/postfix/main.cf /etc/postfix/main.cf.bak
 sudo cp /etc/postfix/master.cf /etc/postfix/master.cf.bak
 ```
 
+Change ownership of config file so that you do not receive the warning:
+
+(Postfix uses a chroot jail for some of its services)
+
+> smtp postfix/postfix-script[1860]: warning: not owned by root: /var/spool/postfix/etc/resolv.conf
+
+```bash
+sudo chown root:root /var/spool/postfix/etc/resolv.conf
+sudo chmod 644 /var/spool/postfix/etc/resolv.conf
+```
+
 As a quick check start the postfix service, view logs, then stop the service. You should successfully see log entries with no errors.
 ```bash
 sudo service postfix start
@@ -422,5 +433,6 @@ namespace SendMail
 }
 
 ```
+
 
 
