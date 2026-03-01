@@ -159,7 +159,7 @@ sudo cp /etc/postfix/main.cf /etc/postfix/main.cf.bak
 sudo cp /etc/postfix/master.cf /etc/postfix/master.cf.bak
 ```
 
-Change ownership of config file so that you do not receive the warning:
+Change ownership of `resolv.conf` file so that you do not receive the warning:
 
 (Postfix uses a chroot jail for some of its services)
 
@@ -433,6 +433,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
