@@ -18,7 +18,7 @@ Update the following files to FQDN hostname and then reboot
 * `nano /etc/hosts`
 
 On some VPS hosting (such as Hostinger) they change /etc/hosts at boot to insert the FQDN they assign.
-We can force them to stop doing that (as a reverse IP lookup may server that name) by locking hosts file:
+We can force them to stop doing that (as a reverse IP lookup for SMTP may serve that name) by locking hosts file:
 
 * `sudo chattr +i /etc/hosts`
 
@@ -422,4 +422,5 @@ namespace SendMail
 }
 
 ```
+
 
