@@ -10,7 +10,7 @@ apt update && apt upgrade -y
 
 ## Set host name to fqdns
 
-Update the following files to FQDN hostname and then reboot
+Update the following files to FQDN hostname and then reboot  
 (change <fqdn> to your mail server fully qualified domain name)
 
 * `sudo hostnamectl set-hostname <fqdn>`
@@ -159,9 +159,7 @@ sudo cp /etc/postfix/main.cf /etc/postfix/main.cf.bak
 sudo cp /etc/postfix/master.cf /etc/postfix/master.cf.bak
 ```
 
-Change ownership of `resolv.conf` file so that you do not receive the warning:
-
-(Postfix uses a chroot jail for some of its services)
+Postfix uses a chroot jail for some of its services. Change ownership of `resolv.conf` file so that you do not receive the warning:
 
 > smtp postfix/postfix-script[1860]: warning: not owned by root: /var/spool/postfix/etc/resolv.conf
 
@@ -433,6 +431,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
