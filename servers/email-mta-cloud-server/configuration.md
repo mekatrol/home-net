@@ -8,7 +8,7 @@
 apt update && apt upgrade -y
 ```
 
-## Set host name to fqdns
+## Set host name to fqdn
 
 Update the following files to FQDN hostname and then reboot  
 (change <fqdn> to your mail server fully qualified domain name)
@@ -106,6 +106,12 @@ server {
     listen [::]:80;
     server_name $HOSTNAME;
     root /var/www/html;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self';" always;
 
     location / {
         index index.html;
@@ -447,6 +453,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
