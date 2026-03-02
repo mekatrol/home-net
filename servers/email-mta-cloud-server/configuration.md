@@ -388,7 +388,7 @@ e.g: if domain is test.com and IP address of SMTP server is 58.165.151.139 then:
 
 <pre>
 Type   Name       Value  
-TXT    _dmarc     v=DMARC1; p=quarantine; rua=mailto:postmaster@test.com 
+TXT    _dmarc     v=DMARC1; p=quarantine; rua=mailto:postmaster@test.com; adkim=s; aspf=s; 
 </pre>
 
 ### Verify
@@ -431,6 +431,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
