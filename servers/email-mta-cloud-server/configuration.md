@@ -105,7 +105,14 @@ server {
     listen 80;
     listen [::]:80;
     server_name $HOSTNAME;
+
+    # Root directory
     root /var/www/html;
+    index index.html;
+
+    # Disable ETags and server tokens
+    etag off;
+    server_tokens off;
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -113,10 +120,12 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Content-Security-Policy "default-src 'self';" always;
 
+    # Main location
     location / {
-        index index.html;
+        try_files $uri $uri/ =404;
     }
 
+    # ACME challenge for Let's Encrypt (allow only this path)
     location ~ /.well-known/acme-challenge {
         allow all;
     }
@@ -453,6 +462,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
