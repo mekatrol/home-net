@@ -137,6 +137,12 @@ EOF
 # Enable site
 sudo ln -s /etc/nginx/sites-available/$HOSTNAME /etc/nginx/sites-enabled/$HOSTNAME
 
+# Harden settings
+sudo nano /etc/nginx/nginx.conf
+
+# Set
+server_tokens off; # Recommended practice is to turn this off
+
 # Restart NGINX
 sudo service nginx restart
 ```
@@ -438,6 +444,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
