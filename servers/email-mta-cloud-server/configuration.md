@@ -14,8 +14,8 @@ Update the following files to FQDN hostname and then reboot
 (change <fqdn> to your mail server fully qualified domain name)
 
 * `sudo hostnamectl set-hostname <fqdn>`
-* `nano /etc/hostname`
-* `nano /etc/hosts`
+* `sudo nano /etc/hostname`
+* `sudo nano /etc/hosts`
 
 On some VPS hosting (such as Hostinger) they change /etc/hosts at boot to insert the FQDN they assign.
 We can force them to stop doing that (as a reverse IP lookup for SMTP may serve that name) by locking hosts file:
@@ -198,8 +198,8 @@ mydestination = $myhostname, smtp.<domain>.com, localhost.<domain>.com, , localh
 
 ### Accept all users for configured domains and forward to upstream server for those domains
 ```bash
-export DOMAIN1=@domain1.com
-export DOMAIN2=@domain2.com
+export DOMAIN1=domain1.com
+export DOMAIN2=domain2.com
 export UPSTREAM_SMTP=smtp.upstream.com
 
 cat <<EOF | sudo tee /etc/postfix/transport > /dev/null
@@ -431,6 +431,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
