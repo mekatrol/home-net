@@ -30,6 +30,10 @@ Reboot server
 
 `sudo reboot`
 
+## Configure reverse IP FQDN
+
+View your VM/VPS settings within the hosting provider panel, there is normally an option to set the FQDN/host name that will be used for reverse IP lookups. This will need to be set as some mail systems perform a reverse IP lookup to guage if is a SPAM SMTP server.
+
 ## Set up SSH
 
 ### Add ssh user
@@ -431,6 +435,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
