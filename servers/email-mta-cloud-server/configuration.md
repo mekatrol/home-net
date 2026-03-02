@@ -232,6 +232,7 @@ sudo postconf -e "transport_maps = hash:/etc/postfix/transport"
 # Reject unathorised destinations
 sudo postconf -e "smtpd_relay_restrictions=permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination"
 
+sudo postmap /etc/postfix/transport
 sudo service postfix restart
 ```
 
@@ -438,6 +439,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
