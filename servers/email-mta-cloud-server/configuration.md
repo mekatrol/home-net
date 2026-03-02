@@ -143,6 +143,9 @@ sudo nano /etc/nginx/nginx.conf
 # Set
 server_tokens off; # Recommended practice is to turn this off
 
+# Add in HTTP block (after server_tokens off;)
+etag off;
+
 # Restart NGINX
 sudo service nginx restart
 ```
@@ -444,6 +447,7 @@ namespace SendMail
 }
 
 ```
+
 
 
 
