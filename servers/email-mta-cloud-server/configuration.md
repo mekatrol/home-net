@@ -8,16 +8,31 @@
 apt update && apt upgrade -y
 ```
 
-## Set host name to fqdns
+## Set host name to fqdn
 
-Update the following files to FQDN hostname and then reboot
+Update the following files to FQDN hostname and then reboot  
+(change <fqdn> to your mail server fully qualified domain name)
 
-* `nano /etc/hostname`
-* `nano /etc/hosts`
+* `sudo hostnamectl set-hostname <fqdn>`
+* `sudo nano /etc/hostname`
+* `sudo nano /etc/hosts`
+
+On some VPS hosting (such as Hostinger) they change /etc/hosts at boot to insert the FQDN they assign.
+We can force them to stop doing that (as a reverse IP lookup for SMTP may serve that name) by locking hosts file:
+
+* `sudo chattr +i /etc/hosts`
+
+This can later be undone for edit by:
+
+* `sudo chattr -i /etc/hosts`
 
 Reboot server
 
 `sudo reboot`
+
+## Configure reverse IP FQDN
+
+View your VM/VPS settings within the hosting provider panel, there is normally an option to set the FQDN/host name that will be used for reverse IP lookups. This will need to be set as some mail systems perform a reverse IP lookup to guage if is a SPAM SMTP server.
 
 ## Set up SSH
 
@@ -90,12 +105,27 @@ server {
     listen 80;
     listen [::]:80;
     server_name $HOSTNAME;
-    root /var/www/html;
 
+    # Root directory
+    root /var/www/html;
+    index index.html;
+
+    # Disable ETags and server tokens
+    etag off;
+    server_tokens off;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self';" always;
+
+    # Main location
     location / {
-        index index.html;
+        try_files $uri $uri/ =404;
     }
 
+    # ACME challenge for Let's Encrypt (allow only this path)
     location ~ /.well-known/acme-challenge {
         allow all;
     }
@@ -122,6 +152,15 @@ EOF
 # Enable site
 sudo ln -s /etc/nginx/sites-available/$HOSTNAME /etc/nginx/sites-enabled/$HOSTNAME
 
+# Harden settings
+sudo nano /etc/nginx/nginx.conf
+
+# Set
+server_tokens off; # Recommended practice is to turn this off
+
+# Add in HTTP block (after server_tokens off;)
+etag off;
+
 # Restart NGINX
 sudo service nginx restart
 ```
@@ -146,6 +185,15 @@ sudo apt install postfix -y
 # Backup configuration files
 sudo cp /etc/postfix/main.cf /etc/postfix/main.cf.bak
 sudo cp /etc/postfix/master.cf /etc/postfix/master.cf.bak
+```
+
+Postfix uses a chroot jail for some of its services. Change ownership of `resolv.conf` file so that you do not receive the warning:
+
+> smtp postfix/postfix-script[1860]: warning: not owned by root: /var/spool/postfix/etc/resolv.conf
+
+```bash
+sudo chown root:root /var/spool/postfix/etc/resolv.conf
+sudo chmod 644 /var/spool/postfix/etc/resolv.conf
 ```
 
 As a quick check start the postfix service, view logs, then stop the service. You should successfully see log entries with no errors.
@@ -178,8 +226,8 @@ mydestination = $myhostname, smtp.<domain>.com, localhost.<domain>.com, , localh
 
 ### Accept all users for configured domains and forward to upstream server for those domains
 ```bash
-export DOMAIN1=@domain1.com
-export DOMAIN2=@domain2.com
+export DOMAIN1=domain1.com
+export DOMAIN2=domain2.com
 export UPSTREAM_SMTP=smtp.upstream.com
 
 cat <<EOF | sudo tee /etc/postfix/transport > /dev/null
@@ -204,6 +252,9 @@ sudo postconf -e "smtpd_tls_key_file = /etc/letsencrypt/live/$HOSTNAME-rsa/privk
 # If no relayhost is configured then the recipient domains SMTP server is used
 sudo postconf -e "relayhost = "
 sudo postconf -e "transport_maps = hash:/etc/postfix/transport"
+
+# Reject unathorised destinations
+sudo postconf -e "smtpd_relay_restrictions=permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination"
 
 sudo service postfix restart
 ```
@@ -368,7 +419,7 @@ e.g: if domain is test.com and IP address of SMTP server is 58.165.151.139 then:
 
 <pre>
 Type   Name       Value  
-TXT    _dmarc     v=DMARC1; p=quarantine; rua=mailto:postmaster@test.com 
+TXT    _dmarc     v=DMARC1; p=quarantine; rua=mailto:postmaster@test.com; adkim=s; aspf=s; 
 </pre>
 
 ### Verify
@@ -409,4 +460,20 @@ namespace SendMail
         }
     }
 }
+
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
