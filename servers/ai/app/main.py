@@ -49,16 +49,21 @@ log = setup_logging()
 # Config
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class DeviceConfig:
     name: str
     host: str
     mqtt_topic: str
     ssh_user: str
-    ssh_key: str                  # path to private key file
-    ping_interval: int = 60       # seconds between expected pings
-    miss_threshold: int = 3       # missed pings before reboot
-    reboot_cooldown: int = 300    # seconds to suppress alerts after a reboot
+    ssh_key: str  # path to private key file
+    ping_interval: int = 60  # seconds between expected pings
+    miss_threshold: int = 3  # missed pings before reboot
+    reboot_cooldown: int = 300  # seconds to suppress alerts after a reboot
+
+
+SSH_MAX_RETRIES = 3
+SSH_RETRY_DELAY = 5  # seconds between retry attempts
 
 
 @dataclass
@@ -67,6 +72,8 @@ class DeviceState:
     last_seen: float = field(default_factory=time.monotonic)
     rebooting: bool = False
     reboot_at: Optional[float] = None
+    disabled: bool = False
+    ssh_failures: int = 0
 
 
 def load_config(path: Path) -> tuple[dict, list[DeviceConfig]]:
@@ -80,6 +87,7 @@ def load_config(path: Path) -> tuple[dict, list[DeviceConfig]]:
 # ---------------------------------------------------------------------------
 # MQTT bridge  (paho callbacks → asyncio Queue)
 # ---------------------------------------------------------------------------
+
 
 class MqttBridge:
     def __init__(
@@ -123,7 +131,9 @@ class MqttBridge:
             self._queue.put_nowait, (msg.topic, msg.payload)
         )
 
-    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
+    def _on_disconnect(
+        self, client, userdata, disconnect_flags, reason_code, properties
+    ):
         log.warning("MQTT disconnected (reason: %s) — paho will reconnect", reason_code)
 
     # --- asyncio interface ---
@@ -146,27 +156,58 @@ class MqttBridge:
 # SSH reboot
 # ---------------------------------------------------------------------------
 
-async def ssh_reboot(device: DeviceConfig) -> None:
-    log.info("[%s] SSH reboot → %s@%s", device.name, device.ssh_user, device.host)
-    try:
-        async with asyncssh.connect(
+
+async def ssh_reboot(state: DeviceState) -> None:
+    device = state.config
+    for attempt in range(1, SSH_MAX_RETRIES + 1):
+        log.info(
+            "[%s] SSH reboot attempt %d/%d → %s@%s",
+            device.name,
+            attempt,
+            SSH_MAX_RETRIES,
+            device.ssh_user,
             device.host,
-            username=device.ssh_user,
-            client_keys=[device.ssh_key],
-            known_hosts=None,           # fine for a trusted home network
-            connect_timeout=15,
-        ) as conn:
-            # The remote authorized_keys forces all connections through the
-            # watchdog dispatcher, which maps "reboot" → sudo /sbin/reboot
-            await conn.run("reboot", check=False, timeout=10)
-        log.info("[%s] Reboot command sent", device.name)
-    except (asyncssh.Error, OSError, asyncio.TimeoutError) as exc:
-        log.error("[%s] SSH reboot failed: %s", device.name, exc)
+        )
+        try:
+            async with asyncssh.connect(
+                device.host,
+                username=device.ssh_user,
+                client_keys=[device.ssh_key],
+                known_hosts=None,  # fine for a trusted home network
+                connect_timeout=15,
+            ) as conn:
+                # The remote authorized_keys forces all connections through the
+                # watchdog dispatcher, which maps "reboot" → sudo /sbin/reboot
+                await conn.run("reboot", check=False, timeout=10)
+            log.info("[%s] Reboot command sent", device.name)
+            state.ssh_failures = 0
+            return
+        except (asyncssh.Error, OSError, asyncio.TimeoutError) as exc:
+            log.warning(
+                "[%s] SSH attempt %d/%d failed: %s",
+                device.name,
+                attempt,
+                SSH_MAX_RETRIES,
+                exc,
+            )
+            if attempt < SSH_MAX_RETRIES:
+                await asyncio.sleep(SSH_RETRY_DELAY)
+
+    state.ssh_failures += 1
+    state.disabled = True
+    state.rebooting = False
+    log.error(
+        "[%s] SSH reboot failed after %d attempts — device disabled. "
+        "To re-enable publish the device name to MQTT topic 'watchdog/enable'",
+        device.name,
+        SSH_MAX_RETRIES,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Watchdog loop
 # ---------------------------------------------------------------------------
+
 
 async def watchdog_loop(states: dict[str, DeviceState]) -> None:
     """Checks every 10 s whether any device has gone silent long enough to reboot."""
@@ -176,6 +217,9 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
 
         for state in states.values():
             cfg = state.config
+
+            if state.disabled:
+                continue
 
             if state.rebooting:
                 elapsed_since_reboot = now - state.reboot_at
@@ -187,7 +231,7 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
                     continue
                 log.info("[%s] Cooldown elapsed, resuming monitoring", cfg.name)
                 state.rebooting = False
-                state.last_seen = now   # avoid an immediate re-trigger
+                state.last_seen = now  # avoid an immediate re-trigger
                 continue
 
             silence = now - state.last_seen
@@ -204,7 +248,7 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
                 )
                 state.rebooting = True
                 state.reboot_at = now
-                asyncio.create_task(ssh_reboot(cfg))
+                asyncio.create_task(ssh_reboot(state))
             elif silence > cfg.ping_interval:
                 log.info(
                     "[%s] Overdue by %.0fs (last seen %.0fs ago)",
@@ -218,14 +262,34 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
 # MQTT listener
 # ---------------------------------------------------------------------------
 
-async def mqtt_listener(
-    bridge: MqttBridge, states: dict[str, DeviceState]
-) -> None:
+ENABLE_TOPIC = "watchdog/enable"
+
+
+async def mqtt_listener(bridge: MqttBridge, states: dict[str, DeviceState]) -> None:
     topic_map = {s.config.mqtt_topic: s for s in states.values()}
 
     async for topic, payload in bridge.messages():
+        if topic == ENABLE_TOPIC:
+            name = payload.decode().strip()
+            state = states.get(name)
+            if state:
+                log.info("[%s] Re-enabled by user request", name)
+                state.disabled = False
+                state.ssh_failures = 0
+                state.rebooting = False
+                state.last_seen = time.monotonic()
+            else:
+                log.warning("Enable request for unknown device: '%s'", name)
+            continue
+
         state = topic_map.get(topic)
         if state:
+            if state.disabled:
+                log.debug(
+                    "[%s] Ping received but device is disabled — ignoring",
+                    state.config.name,
+                )
+                continue
             state.last_seen = time.monotonic()
             log.debug("[%s] Ping received", state.config.name)
         else:
@@ -235,6 +299,7 @@ async def mqtt_listener(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 async def main() -> None:
     config_path = Path("/run/secrets/config.yaml")
@@ -254,6 +319,9 @@ async def main() -> None:
     )
 
     states: dict[str, DeviceState] = {d.name: DeviceState(config=d) for d in devices}
+
+    bridge.subscribe(ENABLE_TOPIC)
+    log.info("Listening for re-enable commands on '%s'", ENABLE_TOPIC)
 
     for dev in devices:
         bridge.subscribe(dev.mqtt_topic)
