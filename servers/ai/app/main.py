@@ -24,7 +24,7 @@ LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 def setup_logging() -> logging.Logger:
     logger = logging.getLogger("watchdog")
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     # stdout — keeps docker logs working
     stream = logging.StreamHandler()
@@ -291,7 +291,7 @@ async def mqtt_listener(bridge: MqttBridge, states: dict[str, DeviceState]) -> N
                 )
                 continue
             state.last_seen = time.monotonic()
-            log.debug("[%s] Ping received", state.config.name)
+            log.debug("[%s] Ping received on topic '%s'", state.config.name, topic)
         else:
             log.debug("Untracked topic: %s", topic)
 
