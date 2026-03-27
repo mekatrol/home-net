@@ -75,6 +75,8 @@ docker run \
     --ip="$CONTAINER_IP_ADDR" \
     --hostname="$HOSTNAME" \
     --dns "$DNSHOST" \
+    -v "$PWD/secrets:/run/secrets:ro" \
+    -v "$PWD/logs:/var/log/home-monitor" \
     -e SSH_USER_NAME="$SSH_USER_NAME" \
     -e SSH_USER_PASSWORD="$SSH_USER_PASSWORD" \
     "$IMAGE_REF"

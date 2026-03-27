@@ -1,0 +1,18 @@
+# Home monitor watchdog config
+# Place the real version at /run/secrets/config.yaml (mounted from ./secrets/)
+
+mqtt:
+  broker: "mqtt.local"                     # IP or hostname of your MQTT broker
+  port: 1883
+  username: "watchdog"                     # omit if broker has no auth
+  password: "secret"
+
+devices:
+  - name: "Raspberry Pi Device"
+    host: "my-pi.local"
+    mqtt_topic: "ping/mypi"
+    ssh_user: "watchdog"
+    ssh_key: "/home/ssh/.ssh/watchdog_key"   # copied from /run/secrets/ at container start
+    ping_interval: 60                      # device publishes a ping every 60 s
+    miss_threshold: 3                      # reboot after 3 missed pings (3 min silence)
+    reboot_cooldown: 300                   # wait 5 min after reboot before re-monitoring

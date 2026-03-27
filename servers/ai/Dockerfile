@@ -20,7 +20,7 @@ RUN if [ -z "$TIMEZONE" ]; then \
 
 # Base packages
 RUN apt-get update && apt-get install -y \
-    sudo syslog-ng-core syslog-ng-scl nano tzdata openssh-server git supervisor python3-venv iputils-ping dnsutils && \
+    sudo nano tzdata openssh-server openssh-client supervisor python3 python3-pip python3-venv iputils-ping dnsutils ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 ENV SSH_USER_NAME=${SSH_USER_NAME}
@@ -34,22 +34,21 @@ RUN usermod -aG sudo $SSH_USER_NAME
 # Ensure ownership first
 RUN chown -R ${SSH_USER_NAME}:${SSH_USER_NAME} /home/${SSH_USER_NAME}
 
-# Exclude core messages in docker cotnainer
-RUN sed -i 's/system()/system(exclude-kmsg(yes))/g' /etc/syslog-ng/syslog-ng.conf || true
-
-# Reduce syslog-ng noise in container
-RUN mkdir -p /usr/share/syslog-ng && \
-    touch /usr/share/syslog-ng/smart-multi-line.fsm && \
-    sed -i '1s/^@version: .*/@version: 4.3/' /etc/syslog-ng/syslog-ng.conf || true && \
-    sed -i 's/^[[:space:]]*stats_freq([^)]*);/stats(freq(0));/' /etc/syslog-ng/syslog-ng.conf || true
-
 # Set timezone
-RUN  ln -fs /usr/share/zoneinfo/$TIMEZONE /etc/localtime && \
+RUN ln -fs /usr/share/zoneinfo/$TIMEZONE /etc/localtime && \
     dpkg-reconfigure -f noninteractive tzdata
 
 # Configure sshd
 RUN sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
     sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
+
+# Log directory — mounted as a volume at runtime so logs persist across rebuilds
+RUN mkdir -p /var/log/home-monitor && chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/log/home-monitor
+
+# Install app into its own venv
+COPY app/ /opt/monitor/
+RUN python3 -m venv /opt/monitor/.venv && \
+    /opt/monitor/.venv/bin/pip install --no-cache-dir -r /opt/monitor/requirements.txt
 
 # Create container startup script
 RUN cat > /start.sh <<'SH'
@@ -62,30 +61,29 @@ set -euo pipefail
 # Set password at runtime (not build time)
 echo "$SSH_USER_NAME:$SSH_USER_PASSWORD" | chpasswd
 
-service syslog-ng start
 service ssh start
 
-REPO_DIR="/home/${SSH_USER_NAME}/repos/home-monitor"
-MONITOR_CMD="exec sleep infinity"
+# Fix log directory ownership — the volume mount overwrites build-time chown
+chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/log/home-monitor
 
-if [ -d "$REPO_DIR/.git" ]; then
-    sudo -u "$SSH_USER_NAME" bash -c "cd \"$REPO_DIR\" && git pull" || true
+# Copy any SSH private keys from secrets into the user's ~/.ssh with correct ownership
+mkdir -p /home/${SSH_USER_NAME}/.ssh
+for key in /run/secrets/*_key; do
+    [ -f "$key" ] || continue
+    dest="/home/${SSH_USER_NAME}/.ssh/$(basename $key)"
+    cp "$key" "$dest"
+    chmod 600 "$dest"
+    chown ${SSH_USER_NAME}:${SSH_USER_NAME} "$dest"
+done
 
-    if [ -x "$REPO_DIR/start.sh" ]; then
-        MONITOR_CMD="cd \"$REPO_DIR\" && exec ./start.sh"
-    elif [ -f "$REPO_DIR/main.py" ]; then
-        MONITOR_CMD="cd \"$REPO_DIR\" && exec python3 main.py"
-    fi
-fi
-
-cat > /etc/supervisor/conf.d/monitor.conf <<EOF
+cat > /etc/supervisor/conf.d/home-monitor.conf <<EOF
 [supervisord]
 nodaemon=true
 user=root
 
-[program:monitor]
-command=/bin/bash -c '$MONITOR_CMD'
-directory=/home/${SSH_USER_NAME}
+[program:home-monitor]
+command=/opt/monitor/.venv/bin/python /opt/monitor/main.py
+directory=/opt/monitor
 user=${SSH_USER_NAME}
 environment=HOME="/home/${SSH_USER_NAME}",USER="${SSH_USER_NAME}",LOGNAME="${SSH_USER_NAME}",SHELL="/bin/bash"
 autostart=true
@@ -96,7 +94,7 @@ stderr_logfile=/dev/fd/2
 stderr_logfile_maxbytes=0
 EOF
 
-exec /usr/bin/supervisord -c /etc/supervisor/conf.d/monitor.conf
+exec /usr/bin/supervisord -c /etc/supervisor/conf.d/home-monitor.conf
 SH
 
 RUN chmod +x /start.sh
