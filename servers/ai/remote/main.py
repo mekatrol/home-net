@@ -131,6 +131,9 @@ async def run_command(command: str) -> tuple[bool, str, str]:
     return False, "", "unhandled command"
 
 
+APT_ENV = {"DEBIAN_FRONTEND": "noninteractive", "PATH": "/usr/bin:/usr/sbin:/bin:/sbin"}
+
+
 async def _apt_update_upgrade(autoremove: bool = False) -> tuple[bool, str, str]:
     stdout_parts: list[str] = []
 
@@ -139,25 +142,29 @@ async def _apt_update_upgrade(autoremove: bool = False) -> tuple[bool, str, str]
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=APT_ENV,
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=UPGRADE_TIMEOUT)
         return proc.returncode, out.decode()[:2000], err.decode()[:500]
 
-    rc, out, err = await run("sudo", "/usr/bin/apt-get", "-y", "-q", "update")
-    stdout_parts.append(out)
-    if rc != 0:
-        return False, "\n".join(stdout_parts), err
+    # -o DPkg::Lock::Timeout=60 waits up to 60s for the dpkg lock rather than failing immediately
+    apt = ("sudo", "/usr/bin/apt-get", "-y", "-q", "-o", "DPkg::Lock::Timeout=60")
 
-    rc, out, err = await run("sudo", "/usr/bin/apt-get", "-y", "-q", "upgrade")
+    rc, out, err = await run(*apt, "update")
     stdout_parts.append(out)
     if rc != 0:
-        return False, "\n".join(stdout_parts), err
+        return False, "\n".join(stdout_parts), f"apt update failed (rc={rc}): {err}"
+
+    rc, out, err = await run(*apt, "upgrade")
+    stdout_parts.append(out)
+    if rc != 0:
+        return False, "\n".join(stdout_parts), f"apt upgrade failed (rc={rc}): {err}"
 
     if autoremove:
-        rc, out, err = await run("sudo", "/usr/bin/apt-get", "-y", "-q", "autoremove")
+        rc, out, err = await run(*apt, "autoremove")
         stdout_parts.append(out)
         if rc != 0:
-            return False, "\n".join(stdout_parts), err
+            return False, "\n".join(stdout_parts), f"apt autoremove failed (rc={rc}): {err}"
 
     return True, "\n".join(stdout_parts), ""
 
@@ -244,6 +251,11 @@ async def _receive_loop(ws) -> None:
             log.info("Executing command: %s (id=%s)", cmd, cmd_id)
 
             success, output, error = await run_command(cmd)
+
+            if error:
+                log.warning("Command '%s' failed: %s", cmd, error[:200])
+            else:
+                log.info("Command '%s' completed: success=%s", cmd, success)
 
             try:
                 await ws.send(json.dumps({
