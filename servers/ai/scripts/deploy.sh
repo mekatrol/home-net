@@ -74,35 +74,47 @@ if [ ! -f "$DISPATCH_FILE" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Prompt for MQTT config
+# MQTT config — use env vars if set, otherwise prompt interactively
 # ---------------------------------------------------------------------------
 
-echo "MQTT ping configuration for $TARGET"
-read -rp "  Broker hostname/IP [mqtt.lan]: " MQTT_BROKER
-MQTT_BROKER="${MQTT_BROKER:-mqtt.lan}"
+if [ -z "${MQTT_BROKER:-}" ]; then
+    read -rp "  Broker hostname/IP [mqtt.lan]: " MQTT_BROKER
+    MQTT_BROKER="${MQTT_BROKER:-mqtt.lan}"
+fi
 
-read -rp "  Port [1883]: " MQTT_PORT
-MQTT_PORT="${MQTT_PORT:-1883}"
+if [ -z "${MQTT_PORT:-}" ]; then
+    read -rp "  Port [1883]: " MQTT_PORT
+    MQTT_PORT="${MQTT_PORT:-1883}"
+fi
 
-read -rp "  Topic (e.g. ntp/ping): " MQTT_TOPIC
-while [ -z "$MQTT_TOPIC" ]; do
-    read -rp "  Topic (required): " MQTT_TOPIC
-done
+if [ -z "${MQTT_TOPIC:-}" ]; then
+    read -rp "  Topic (e.g. ntp/ping): " MQTT_TOPIC
+    while [ -z "$MQTT_TOPIC" ]; do
+        read -rp "  Topic (required): " MQTT_TOPIC
+    done
+fi
 
-read -rp "  Ping interval in seconds [10]: " PING_INTERVAL
-PING_INTERVAL="${PING_INTERVAL:-10}"
+if [ -z "${PING_INTERVAL:-}" ]; then
+    read -rp "  Ping interval in seconds [10]: " PING_INTERVAL
+    PING_INTERVAL="${PING_INTERVAL:-10}"
+fi
 
-read -rp "  MQTT username [watchdog]: " MQTT_USER
-MQTT_USER="${MQTT_USER:-watchdog}"
-if [ -n "$MQTT_USER" ]; then
+if [ -z "${MQTT_USER:-}" ]; then
+    read -rp "  MQTT username (leave blank for none): " MQTT_USER
+fi
+
+if [ -n "${MQTT_USER:-}" ] && [ -z "${MQTT_PASS:-}" ]; then
     read -rsp "  MQTT password: " MQTT_PASS
     echo ""
-else
-    MQTT_PASS=""
 fi
+MQTT_USER="${MQTT_USER:-}"
+MQTT_PASS="${MQTT_PASS:-}"
+
+echo "Deploying to $TARGET (topic: $MQTT_TOPIC, broker: $MQTT_BROKER)"
 
 # ---------------------------------------------------------------------------
 # SSH connection — one password prompt for the entire script
+# (set SSH_PASS env var to use sshpass for non-interactive deployments)
 # ---------------------------------------------------------------------------
 
 CONTROL_SOCKET="/tmp/deploy-$$"
@@ -119,12 +131,31 @@ if [ -n "$SSH_KEY" ]; then
 fi
 
 step "Opening SSH connection to $TARGET"
-ssh "${SSH_OPTS[@]}" -O check "$TARGET" 2>/dev/null || ssh "${SSH_OPTS[@]}" -MNf "$TARGET"
+if [ -n "${SSH_PASS:-}" ]; then
+    SSH_CMD=(sshpass -p "$SSH_PASS" ssh)
+else
+    SSH_CMD=(ssh)
+fi
+"${SSH_CMD[@]}" "${SSH_OPTS[@]}" -O check "$TARGET" 2>/dev/null || "${SSH_CMD[@]}" "${SSH_OPTS[@]}" -MNf "$TARGET"
 
 cleanup() {
+    ssh "${SSH_OPTS[@]}" "sudo rm -f /etc/sudoers.d/99-deploy-temp" 2>/dev/null || true
     ssh "${SSH_OPTS[@]}" -O exit "$TARGET" 2>/dev/null || true
 }
 trap cleanup EXIT
+
+# If SSH_PASS is set, grant temporary passwordless sudo so the rest of the
+# script never prompts. sudo -S reads the password from stdin (first line);
+# tee writes the remainder (the sudoers rule) to the file.
+if [ -n "${SSH_PASS:-}" ]; then
+    step "Granting temporary passwordless sudo"
+    REMOTE_USER="${TARGET%@*}"
+    # Pipe only the password to sudo -S; the sudoers rule is embedded in the command
+    # so it never appears in the file alongside the password.
+    printf '%s\n' "$SSH_PASS" | \
+        ssh "${SSH_OPTS[@]}" "$TARGET" \
+        "sudo -S bash -c 'printf \"%s ALL=(ALL) NOPASSWD: ALL\n\" \"$REMOTE_USER\" > /etc/sudoers.d/99-deploy-temp && chmod 440 /etc/sudoers.d/99-deploy-temp'"
+fi
 
 ssh_run() {
     ssh "${SSH_OPTS[@]}" "$TARGET" "$@"
