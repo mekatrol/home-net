@@ -1,33 +1,42 @@
 # Home monitor watchdog config
 # Place the real version at /run/secrets/config.yaml (mounted from ./secrets/)
 
+server:
+  host: "0.0.0.0"
+  port: 8765
+  token: "change-me-to-something-secret"  # shared secret — same value in all device configs
+
+# MQTT broker — only required if any devices use mqtt_topic (MQTT-only monitoring)
 mqtt:
-  broker: "mqtt.local"                     # IP or hostname of your MQTT broker
+  broker: "mqtt.lan"
   port: 1883
-  username: "watchdog"                     # omit if broker has no auth
+  username: "watchdog"
   password: "secret"
 
-log_level: info                            # debug, info, warning, error
-status_interval: 10                        # seconds between online/offline status publishes
+log_level: info
+status_interval: 10   # seconds between MQTT status publishes for all devices
 
 devices:
-  # Full device with SSH reboot support
-  - name: "Raspberry Pi Device"
-    mqtt_device_name: "rpi-device"
-    host: "my-pi.local"
-    mqtt_topic: "ping/mypi"
-    ssh_user: "watchdog"
-    ssh_key: "/home/ssh/.ssh/watchdog_key"   # copied from /run/secrets/ at container start
-    ping_interval: 60                      # device publishes a ping every 60 s
-    miss_threshold: 3                      # reboot after 3 missed pings (3 min silence)
-    reboot_cooldown: 300                   # wait 5 min after reboot before re-monitoring
-    status_retain_ttl: 30                  # broker discards retained status after 30 secs min (MQTTv5)
-    upgrade_reboot_time: "02:00"           # daily apt upgrade + reboot at this time; omit to disable
-
-  # MicroPython / embedded device — no SSH, ping monitoring only
-  - name: "ESP32 Sensor"
-    mqtt_device_name: "esp32-sensor"
-    mqtt_topic: "ping/esp32-sensor"
+  # WebSocket device — runs remote/main.py, supports reboot/upgrade commands
+  - name: "Pi NAS Monitor"
+    device_name: "pi-nas"           # must match client's server.device_name
     ping_interval: 30
     miss_threshold: 3
-    status_retain_ttl: 30                  # broker discards retained status after 30 secs min (MQTTv5)
+    reboot_cooldown: 300
+    upgrade_reboot_time: "02:00"    # daily apt upgrade + reboot; omit to disable
+
+  - name: "NTP Server"
+    device_name: "ntp"
+    ping_interval: 30
+    miss_threshold: 3
+    reboot_cooldown: 300
+
+  # MQTT-only device — cannot run WebSocket client; monitored via MQTT subscription only
+  # Silence triggers a warning log; reboot is not possible
+  - name: "Lego Train"
+    mqtt_topic: "lego_train/state"  # presence of mqtt_topic marks this as MQTT-only
+    mqtt_device_name: "pi-lego-train"
+    ping_interval: 10
+    miss_threshold: 3
+    reboot_cooldown: 300
+    status_retain_ttl: 60

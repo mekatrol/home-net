@@ -20,7 +20,8 @@ RUN if [ -z "$TIMEZONE" ]; then \
 
 # Base packages
 RUN apt-get update && apt-get install -y \
-    sudo nano tzdata openssh-server openssh-client supervisor python3 python3-pip python3-venv iputils-ping dnsutils ca-certificates && \
+    sudo nano tzdata openssh-server openssh-client supervisor python3 python3-pip python3-venv \
+    iputils-ping dnsutils ca-certificates openssl && \
     rm -rf /var/lib/apt/lists/*
 
 ENV SSH_USER_NAME=${SSH_USER_NAME}
@@ -45,6 +46,9 @@ RUN sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ss
 # Log directory — mounted as a volume at runtime so logs persist across rebuilds
 RUN mkdir -p /var/log/home-monitor && chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/log/home-monitor
 
+# TLS cert directory — persists self-signed cert across restarts
+RUN mkdir -p /var/lib/watchdog-server
+
 # Install app into its own venv
 COPY app/ /opt/monitor/
 RUN python3 -m venv /opt/monitor/.venv && \
@@ -66,15 +70,15 @@ service ssh start
 # Fix log directory ownership — the volume mount overwrites build-time chown
 chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/log/home-monitor
 
-# Copy any SSH private keys from secrets into the user's ~/.ssh with correct ownership
-mkdir -p /home/${SSH_USER_NAME}/.ssh
-for key in /run/secrets/*_key; do
-    [ -f "$key" ] || continue
-    dest="/home/${SSH_USER_NAME}/.ssh/$(basename $key)"
-    cp "$key" "$dest"
-    chmod 600 "$dest"
-    chown ${SSH_USER_NAME}:${SSH_USER_NAME} "$dest"
-done
+# Generate self-signed TLS cert for WebSocket server if not already present
+if [ ! -f /var/lib/watchdog-server/server.crt ]; then
+    openssl req -x509 -newkey rsa:2048 \
+        -keyout /var/lib/watchdog-server/server.key \
+        -out /var/lib/watchdog-server/server.crt \
+        -days 3650 -nodes -subj "/CN=watchdog-server"
+    chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/lib/watchdog-server/server.crt /var/lib/watchdog-server/server.key
+    echo "TLS certificate generated."
+fi
 
 cat > /etc/supervisor/conf.d/home-monitor.conf <<EOF
 [unix_http_server]

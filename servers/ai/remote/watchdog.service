@@ -1,12 +1,12 @@
 [Unit]
-Description=MQTT Ping Service
+Description=Watchdog WebSocket Client
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=ping-svc
-ExecStart=/opt/ping/.venv/bin/python /opt/ping/main.py
+User=watchdog
+ExecStart=/opt/watchdog/.venv/bin/python /opt/watchdog/main.py
 Restart=always
 RestartSec=10
 StandardOutput=journal

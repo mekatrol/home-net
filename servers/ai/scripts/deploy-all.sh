@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deploy the ping service and watchdog SSH access to all monitored devices.
+# Deploy the watchdog WebSocket client to all monitored devices.
 #
 # This is the TEMPLATE — do not put real credentials here.
 # Copy this file to secrets/deploy-all.sh and fill in the real values there.
@@ -15,18 +15,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOY_SH="$SCRIPT_DIR/scripts/deploy.sh"
 
+# Shared config — same token across all devices (must match server config)
+WS_SERVER_URL="wss://ai.lan:8765"
+WS_TOKEN="change-me-to-something-secret"
+
 deploy() {
-    local target="$1"        # user@host
-    local mqtt_topic="$2"    # MQTT topic this device publishes pings on
-    local mqtt_broker="${3:-mqtt.lan}"
-    local mqtt_port="${4:-1883}"
-    local mqtt_user="${5:-}"
-    local mqtt_pass="${6:-}"
-    local ping_interval="${7:-60}"
+    local target="$1"         # user@host
+    local device_name="$2"    # slug matching server config device_name
+    local heartbeat="${3:-30}" # heartbeat interval in seconds
 
     echo ""
     echo "========================================"
-    echo "Deploying to $target"
+    echo "Deploying to $target ($device_name)"
     echo "========================================"
 
     local ssh_pass
@@ -34,15 +34,13 @@ deploy() {
     echo ""
 
     SSH_PASS="$ssh_pass" \
-    MQTT_BROKER="$mqtt_broker" \
-    MQTT_PORT="$mqtt_port" \
-    MQTT_TOPIC="$mqtt_topic" \
-    PING_INTERVAL="$ping_interval" \
-    MQTT_USER="$mqtt_user" \
-    MQTT_PASS="$mqtt_pass" \
+    WS_URL="$WS_SERVER_URL" \
+    WS_DEVICE_NAME="$device_name" \
+    WS_TOKEN="$WS_TOKEN" \
+    HEARTBEAT="$heartbeat" \
     "$DEPLOY_SH" "$target"
 }
 
-# deploy <user@host> <mqtt-topic> [broker] [port] [mqtt-user] [mqtt-pass] [interval]
-deploy "pi@device1.lan"  "device1/ping"  "mqtt.lan"  "1883"  "watchdog"  "mqtt-password-here"  "60"
-deploy "pi@device2.lan"  "device2/ping"  "mqtt.lan"  "1883"  "watchdog"  "mqtt-password-here"  "60"
+# deploy <user@host> <device-name> [heartbeat-interval]
+deploy "pi@device1.lan"  "device1"  "30"
+deploy "pi@device2.lan"  "device2"  "30"

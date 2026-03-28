@@ -2,19 +2,16 @@
 # Remove everything deployed by deploy.sh from a remote Pi.
 #
 # What this script removes:
-#   Ping service:
-#     1. Stops and disables the ping systemd service
+#   Watchdog service:
+#     1. Stops and disables the watchdog systemd service
 #     2. Removes the service file and reloads systemd
-#     3. Removes /opt/ping (app files and venv)
-#     4. Removes /etc/ping (config)
-#     5. Removes /var/log/ping (logs)
-#     6. Removes the ping-svc system user
+#     3. Removes /opt/watchdog (app files and venv)
+#     4. Removes /etc/watchdog (config)
+#     5. Removes /var/log/watchdog (logs)
 #
-#   Watchdog SSH access:
-#     7. Removes /home/watchdog/.ssh/authorized_keys
-#     8. Removes /usr/local/bin/watchdog-dispatch
-#     9. Removes /etc/sudoers.d/watchdog
-#     10. Removes the watchdog user and home directory
+#   Watchdog user:
+#     6. Removes /etc/sudoers.d/watchdog
+#     7. Removes the watchdog user and home directory
 #
 # Usage:
 #   ./scripts/remove.sh <user@host> [ssh-key-path]
@@ -43,7 +40,7 @@ step() {
 }
 
 # ---------------------------------------------------------------------------
-# SSH connection — one password prompt for the entire script
+# SSH connection
 # ---------------------------------------------------------------------------
 
 CONTROL_SOCKET="/tmp/remove-$$"
@@ -75,7 +72,7 @@ trap cleanup EXIT
 
 if [ -n "${SSH_PASS:-}" ]; then
     step "Granting temporary passwordless sudo"
-    REMOTE_USER="${TARGET%@*}"
+    REMOTE_USER="${TARGET%%@*}"
     printf '%s\n' "$SSH_PASS" | \
         ssh "${SSH_OPTS[@]}" "$TARGET" \
         "sudo -S bash -c 'printf \"%s ALL=(ALL) NOPASSWD: ALL\n\" \"$REMOTE_USER\" > /etc/sudoers.d/99-deploy-temp && chmod 440 /etc/sudoers.d/99-deploy-temp'"
@@ -86,18 +83,18 @@ ssh_run() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Stop and disable ping service
+# 1. Stop and disable watchdog service
 # ---------------------------------------------------------------------------
 
-step "Stopping and disabling ping service"
-if ssh_run "systemctl is-active ping" &>/dev/null; then
-    ssh_run "sudo systemctl stop ping"
+step "Stopping and disabling watchdog service"
+if ssh_run "systemctl is-active watchdog 2>/dev/null" &>/dev/null; then
+    ssh_run "sudo systemctl stop watchdog"
     echo "    Service stopped."
 else
     echo "    Service not running."
 fi
-if ssh_run "systemctl is-enabled ping 2>/dev/null" &>/dev/null; then
-    ssh_run "sudo systemctl disable ping"
+if ssh_run "systemctl is-enabled watchdog 2>/dev/null" &>/dev/null; then
+    ssh_run "sudo systemctl disable watchdog"
     echo "    Service disabled."
 fi
 
@@ -106,49 +103,31 @@ fi
 # ---------------------------------------------------------------------------
 
 step "Removing systemd service file"
-ssh_run "sudo rm -f /etc/systemd/system/ping.service"
+ssh_run "sudo rm -f /etc/systemd/system/watchdog.service"
 ssh_run "sudo systemctl daemon-reload"
 
 # ---------------------------------------------------------------------------
 # 3–5. Remove app files, config, and logs
 # ---------------------------------------------------------------------------
 
-step "Removing /opt/ping"
-ssh_run "sudo rm -rf /opt/ping"
+step "Removing /opt/watchdog"
+ssh_run "sudo rm -rf /opt/watchdog"
 
-step "Removing /etc/ping"
-ssh_run "sudo rm -rf /etc/ping"
+step "Removing /etc/watchdog"
+ssh_run "sudo rm -rf /etc/watchdog"
 
-step "Removing /var/log/ping"
-ssh_run "sudo rm -rf /var/log/ping"
-
-# ---------------------------------------------------------------------------
-# 6. Remove ping-svc user
-# ---------------------------------------------------------------------------
-
-step "Removing ping-svc user"
-if ssh_run "id ping-svc" &>/dev/null; then
-    ssh_run "sudo userdel ping-svc"
-    echo "    User 'ping-svc' removed."
-else
-    echo "    User 'ping-svc' does not exist."
-fi
+step "Removing /var/log/watchdog"
+ssh_run "sudo rm -rf /var/log/watchdog"
 
 # ---------------------------------------------------------------------------
-# 7–9. Remove watchdog SSH access
+# 6. Remove sudoers entry
 # ---------------------------------------------------------------------------
-
-step "Removing watchdog authorized_keys"
-ssh_run "sudo rm -f /home/watchdog/.ssh/authorized_keys"
-
-step "Removing watchdog-dispatch"
-ssh_run "sudo rm -f /usr/local/bin/watchdog-dispatch"
 
 step "Removing sudoers entry for watchdog"
 ssh_run "sudo rm -f /etc/sudoers.d/watchdog"
 
 # ---------------------------------------------------------------------------
-# 10. Remove watchdog user
+# 7. Remove watchdog user
 # ---------------------------------------------------------------------------
 
 step "Removing watchdog user"

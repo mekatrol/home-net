@@ -1,8 +1,8 @@
 #!/bin/bash
-# Remove deployed ping service and watchdog SSH access from all monitored devices.
+# Remove the watchdog service from all monitored devices.
 #
 # This is the TEMPLATE — do not put real credentials here.
-# Copy this file to secrets/remove-all.sh and fill in the real values there.
+# Copy this file to secrets/remove-all.sh and fill in the real device list.
 #
 # Usage:
 #   ./secrets/remove-all.sh

@@ -1,23 +1,20 @@
 #!/bin/bash
-# Deploy the MQTT ping service and watchdog SSH access to a remote Pi.
+# Deploy the watchdog WebSocket client service to a remote Pi.
 #
 # What this script does (all steps are idempotent):
 #
-#   Watchdog SSH access (enables the monitor container to reboot this device):
-#     1. Creates the 'watchdog' OS user with a locked-down shell
-#     2. Installs watchdog-dispatch — the SSH command allowlist enforcer
-#     3. Configures sudoers so watchdog can only run permitted binaries
-#     4. Installs the watchdog public key, restricted to the dispatcher
-#     5. Verifies the dispatcher rejects unknown commands
+#   Watchdog user setup:
+#     1. Creates the 'watchdog' OS user
+#     2. Configures sudoers so watchdog can only run reboot and apt-get
 #
-#   MQTT ping service (lets the watchdog detect if this device goes silent):
-#     6.  Installs Python dependencies (python3-venv, python3-pip via apt)
-#     7.  Copies the ping service files to /opt/ping
-#     8.  Writes /etc/ping/config.yaml with the MQTT broker and topic you specify
-#     9.  Creates the 'ping-svc' system user and log directory
-#     10. Sets up a Python venv and installs pip dependencies
-#     11. Installs and enables the systemd ping.service
-#     12. Starts (or restarts) the service and shows its status
+#   Watchdog WebSocket client service:
+#     3.  Installs Python dependencies (python3-venv, python3-pip via apt)
+#     4.  Copies service files to /opt/watchdog
+#     5.  Writes /etc/watchdog/config.yaml with the server URL, device name, and token
+#     6.  Creates the log directory /var/log/watchdog owned by watchdog
+#     7.  Sets up a Python venv and installs pip dependencies
+#     8.  Installs and enables the systemd watchdog.service
+#     9.  Starts (or restarts) the service and shows its status
 #
 # Usage:
 #   ./scripts/deploy.sh <user@host> [ssh-key-path]
@@ -26,9 +23,12 @@
 #   ./scripts/deploy.sh pi@ntp.lan
 #   ./scripts/deploy.sh pi@ntp.lan ~/.ssh/id_rsa
 #
-# Prerequisites:
-#   - secrets/watchdog_key.pub  (generate with: ssh-keygen -t ed25519 -f secrets/watchdog_key -N "")
-#   - remote/watchdog-dispatch  (already in repo)
+# Environment variables (bypass interactive prompts for automation):
+#   WS_URL          wss://ai.lan:8765
+#   WS_DEVICE_NAME  device slug (must match server config)
+#   WS_TOKEN        shared auth token
+#   HEARTBEAT       heartbeat interval in seconds (default: 30)
+#   SSH_PASS        SSH password (uses sshpass)
 
 set -euo pipefail
 
@@ -46,11 +46,7 @@ SSH_KEY="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$SCRIPT_DIR/.."
-SECRETS_DIR="$REPO_DIR/secrets"
-DEPLOY_DIR="$REPO_DIR/deploy"
-PUBKEY_FILE="$SECRETS_DIR/watchdog_key.pub"
-WATCHDOG_KEY="$SECRETS_DIR/watchdog_key"
-DISPATCH_FILE="$REPO_DIR/remote/watchdog-dispatch"
+REMOTE_DIR="$REPO_DIR/remote"
 
 step() {
     echo ""
@@ -61,60 +57,45 @@ step() {
 # Pre-flight checks
 # ---------------------------------------------------------------------------
 
-if [ ! -f "$PUBKEY_FILE" ]; then
-    echo "Error: $PUBKEY_FILE not found." >&2
-    echo "Generate a key pair first:" >&2
-    echo "  ssh-keygen -t ed25519 -f $SECRETS_DIR/watchdog_key -N \"\" -C home-monitor-watchdog" >&2
-    exit 1
-fi
-
-if [ ! -f "$DISPATCH_FILE" ]; then
-    echo "Error: $DISPATCH_FILE not found." >&2
+if [ ! -f "$REMOTE_DIR/main.py" ]; then
+    echo "Error: $REMOTE_DIR/main.py not found." >&2
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# MQTT config — use env vars if set, otherwise prompt interactively
+# Config — use env vars if set, otherwise prompt interactively
 # ---------------------------------------------------------------------------
 
-if [ -z "${MQTT_BROKER:-}" ]; then
-    read -rp "  Broker hostname/IP [mqtt.lan]: " MQTT_BROKER
-    MQTT_BROKER="${MQTT_BROKER:-mqtt.lan}"
+if [ -z "${WS_URL:-}" ]; then
+    read -rp "  WebSocket server URL [wss://ai.lan:8765]: " WS_URL
+    WS_URL="${WS_URL:-wss://ai.lan:8765}"
 fi
 
-if [ -z "${MQTT_PORT:-}" ]; then
-    read -rp "  Port [1883]: " MQTT_PORT
-    MQTT_PORT="${MQTT_PORT:-1883}"
-fi
-
-if [ -z "${MQTT_TOPIC:-}" ]; then
-    read -rp "  Topic (e.g. ntp/ping): " MQTT_TOPIC
-    while [ -z "$MQTT_TOPIC" ]; do
-        read -rp "  Topic (required): " MQTT_TOPIC
+if [ -z "${WS_DEVICE_NAME:-}" ]; then
+    read -rp "  Device name (slug, e.g. pi-nas): " WS_DEVICE_NAME
+    while [ -z "$WS_DEVICE_NAME" ]; do
+        read -rp "  Device name (required): " WS_DEVICE_NAME
     done
 fi
 
-if [ -z "${PING_INTERVAL:-}" ]; then
-    read -rp "  Ping interval in seconds [10]: " PING_INTERVAL
-    PING_INTERVAL="${PING_INTERVAL:-10}"
-fi
-
-if [ -z "${MQTT_USER:-}" ]; then
-    read -rp "  MQTT username (leave blank for none): " MQTT_USER
-fi
-
-if [ -n "${MQTT_USER:-}" ] && [ -z "${MQTT_PASS:-}" ]; then
-    read -rsp "  MQTT password: " MQTT_PASS
+if [ -z "${WS_TOKEN:-}" ]; then
+    read -rsp "  Auth token (must match server config): " WS_TOKEN
     echo ""
+    while [ -z "$WS_TOKEN" ]; do
+        read -rsp "  Auth token (required): " WS_TOKEN
+        echo ""
+    done
 fi
-MQTT_USER="${MQTT_USER:-}"
-MQTT_PASS="${MQTT_PASS:-}"
 
-echo "Deploying to $TARGET (topic: $MQTT_TOPIC, broker: $MQTT_BROKER)"
+if [ -z "${HEARTBEAT:-}" ]; then
+    read -rp "  Heartbeat interval in seconds [30]: " HEARTBEAT
+    HEARTBEAT="${HEARTBEAT:-30}"
+fi
+
+echo "Deploying to $TARGET (device_name: $WS_DEVICE_NAME, server: $WS_URL)"
 
 # ---------------------------------------------------------------------------
 # SSH connection — one password prompt for the entire script
-# (set SSH_PASS env var to use sshpass for non-interactive deployments)
 # ---------------------------------------------------------------------------
 
 CONTROL_SOCKET="/tmp/deploy-$$"
@@ -139,19 +120,14 @@ fi
 "${SSH_CMD[@]}" "${SSH_OPTS[@]}" -O check "$TARGET" 2>/dev/null || "${SSH_CMD[@]}" "${SSH_OPTS[@]}" -MNf "$TARGET"
 
 cleanup() {
-    ssh "${SSH_OPTS[@]}" "sudo rm -f /etc/sudoers.d/99-deploy-temp" 2>/dev/null || true
+    ssh "${SSH_OPTS[@]}" "$TARGET" "sudo rm -f /etc/sudoers.d/99-deploy-temp" 2>/dev/null || true
     ssh "${SSH_OPTS[@]}" -O exit "$TARGET" 2>/dev/null || true
 }
 trap cleanup EXIT
 
-# If SSH_PASS is set, grant temporary passwordless sudo so the rest of the
-# script never prompts. sudo -S reads the password from stdin (first line);
-# tee writes the remainder (the sudoers rule) to the file.
 if [ -n "${SSH_PASS:-}" ]; then
     step "Granting temporary passwordless sudo"
-    REMOTE_USER="${TARGET%@*}"
-    # Pipe only the password to sudo -S; the sudoers rule is embedded in the command
-    # so it never appears in the file alongside the password.
+    REMOTE_USER="${TARGET%%@*}"
     printf '%s\n' "$SSH_PASS" | \
         ssh "${SSH_OPTS[@]}" "$TARGET" \
         "sudo -S bash -c 'printf \"%s ALL=(ALL) NOPASSWD: ALL\n\" \"$REMOTE_USER\" > /etc/sudoers.d/99-deploy-temp && chmod 440 /etc/sudoers.d/99-deploy-temp'"
@@ -161,7 +137,6 @@ ssh_run() {
     ssh "${SSH_OPTS[@]}" "$TARGET" "$@"
 }
 
-# Copy a local file to a remote path via /tmp (avoids needing write perms on dst dir)
 scp_file() {
     local src="$1" dst="$2"
     local tmp="/tmp/deploy-$(basename "$src")"
@@ -180,138 +155,89 @@ if ! ssh_run "id watchdog" &>/dev/null; then
 else
     echo "    User 'watchdog' already exists."
 fi
-ssh_run "sudo mkdir -p /home/watchdog/.ssh"
-ssh_run "sudo chmod 700 /home/watchdog/.ssh"
-ssh_run "sudo chown -R watchdog:watchdog /home/watchdog/.ssh"
 
 # ---------------------------------------------------------------------------
-# 2. Install watchdog-dispatch
-# ---------------------------------------------------------------------------
-
-step "Installing watchdog-dispatch"
-scp_file "$DISPATCH_FILE" /usr/local/bin/watchdog-dispatch
-ssh_run "sudo chown root:root /usr/local/bin/watchdog-dispatch"
-ssh_run "sudo chmod 755 /usr/local/bin/watchdog-dispatch"
-
-# ---------------------------------------------------------------------------
-# 3. Configure sudoers
+# 2. Configure sudoers for watchdog
 # ---------------------------------------------------------------------------
 
 step "Configuring sudoers for watchdog"
 ssh_run "sudo tee /etc/sudoers.d/watchdog > /dev/null" <<'EOF'
-watchdog ALL=(ALL) NOPASSWD: /sbin/reboot, /usr/bin/apt, /usr/bin/apt-get
+watchdog ALL=(ALL) NOPASSWD: /sbin/reboot, /usr/bin/apt-get
 EOF
 ssh_run "sudo chmod 440 /etc/sudoers.d/watchdog"
 
 # ---------------------------------------------------------------------------
-# 4. Authorize public key (restricted to dispatcher)
-# ---------------------------------------------------------------------------
-
-step "Authorizing watchdog_key.pub on remote"
-PUBKEY=$(cat "$PUBKEY_FILE")
-ssh_run "sudo tee /home/watchdog/.ssh/authorized_keys > /dev/null" <<EOF
-command="/usr/local/bin/watchdog-dispatch",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty $PUBKEY
-EOF
-ssh_run "sudo chmod 600 /home/watchdog/.ssh/authorized_keys"
-ssh_run "sudo chown watchdog:watchdog /home/watchdog/.ssh/authorized_keys"
-
-# ---------------------------------------------------------------------------
-# 5. Test dispatcher
-# ---------------------------------------------------------------------------
-
-step "Testing watchdog SSH connection"
-if [ -f "$WATCHDOG_KEY" ]; then
-    if ssh -i "$WATCHDOG_KEY" -o StrictHostKeyChecking=no -l watchdog "${TARGET#*@}" "unknown-command" 2>&1 | grep -q "not permitted"; then
-        echo "    Dispatcher is working — unknown commands are rejected."
-    else
-        echo "    Warning: could not verify dispatcher rejects unknown commands."
-    fi
-else
-    echo "    Skipping test — private key not found at $WATCHDOG_KEY"
-fi
-
-# ---------------------------------------------------------------------------
-# 6. Install Python system dependencies
+# 3. Install Python system dependencies
 # ---------------------------------------------------------------------------
 
 step "Installing Python system dependencies"
 ssh_run "sudo apt-get install -y -q python3-pip python3-venv"
 
 # ---------------------------------------------------------------------------
-# 7. Copy ping service files
+# 4. Copy watchdog service files
 # ---------------------------------------------------------------------------
 
-step "Copying ping service files to /opt/ping"
-ssh_run "sudo mkdir -p /opt/ping"
-scp_file "$DEPLOY_DIR/main.py"          /opt/ping/main.py
-scp_file "$DEPLOY_DIR/requirements.txt" /opt/ping/requirements.txt
+step "Copying watchdog service files to /opt/watchdog"
+ssh_run "sudo mkdir -p /opt/watchdog"
+scp_file "$REMOTE_DIR/main.py"          /opt/watchdog/main.py
+scp_file "$REMOTE_DIR/requirements.txt" /opt/watchdog/requirements.txt
 
 # ---------------------------------------------------------------------------
-# 8. Write MQTT config
+# 5. Write config
 # ---------------------------------------------------------------------------
 
-step "Writing /etc/ping/config.yaml"
-ssh_run "sudo mkdir -p /etc/ping"
-ssh_run "sudo tee /etc/ping/config.yaml > /dev/null" <<EOF
-mqtt:
-  broker: "${MQTT_BROKER}"
-  port: ${MQTT_PORT}
-  username: "${MQTT_USER}"
-  password: "${MQTT_PASS}"
+step "Writing /etc/watchdog/config.yaml"
+ssh_run "sudo mkdir -p /etc/watchdog"
+ssh_run "sudo tee /etc/watchdog/config.yaml > /dev/null" <<EOF
+server:
+  url: "${WS_URL}"
+  device_name: "${WS_DEVICE_NAME}"
+  token: "${WS_TOKEN}"
 
-ping:
-  topic: "${MQTT_TOPIC}"
-  interval: ${PING_INTERVAL}
+heartbeat_interval: ${HEARTBEAT}
 EOF
+ssh_run "sudo chown root:watchdog /etc/watchdog/config.yaml"
+ssh_run "sudo chmod 640 /etc/watchdog/config.yaml"
 
 # ---------------------------------------------------------------------------
-# 9. Create ping-svc user and log directory
+# 6. Create log directory
 # ---------------------------------------------------------------------------
 
-step "Creating service user 'ping-svc' (if not exists)"
-if ! ssh_run "id ping-svc" &>/dev/null; then
-    ssh_run "sudo useradd --system --no-create-home --shell /usr/sbin/nologin ping-svc"
-    echo "    User 'ping-svc' created."
-else
-    echo "    User 'ping-svc' already exists."
-fi
-ssh_run "sudo mkdir -p /var/log/ping"
-ssh_run "sudo chown root:ping-svc /etc/ping/config.yaml"
-ssh_run "sudo chmod 640 /etc/ping/config.yaml"
-ssh_run "sudo chown ping-svc:ping-svc /var/log/ping"
+step "Creating log directory /var/log/watchdog"
+ssh_run "sudo mkdir -p /var/log/watchdog"
+ssh_run "sudo chown watchdog:watchdog /var/log/watchdog"
 
 # ---------------------------------------------------------------------------
-# 10. Set up Python venv
+# 7. Set up Python venv
 # ---------------------------------------------------------------------------
 
-step "Setting up Python venv at /opt/ping/.venv"
-ssh_run "sudo chown -R ping-svc:ping-svc /opt/ping"
-ssh_run "sudo -u ping-svc python3 -m venv /opt/ping/.venv"
-ssh_run "sudo -u ping-svc /opt/ping/.venv/bin/pip install --quiet --no-cache-dir -r /opt/ping/requirements.txt"
+step "Setting up Python venv at /opt/watchdog/.venv"
+ssh_run "sudo chown -R watchdog:watchdog /opt/watchdog"
+ssh_run "sudo -u watchdog python3 -m venv /opt/watchdog/.venv"
+ssh_run "sudo -u watchdog /opt/watchdog/.venv/bin/pip install --quiet --no-cache-dir -r /opt/watchdog/requirements.txt"
 
 # ---------------------------------------------------------------------------
-# 11. Install systemd service
+# 8. Install systemd service
 # ---------------------------------------------------------------------------
 
 step "Installing systemd service"
-scp_file "$DEPLOY_DIR/ping.service" /etc/systemd/system/ping.service
+scp_file "$REMOTE_DIR/watchdog.service" /etc/systemd/system/watchdog.service
 ssh_run "sudo systemctl daemon-reload"
 
 # ---------------------------------------------------------------------------
-# 12. Enable and restart service
+# 9. Enable and restart service
 # ---------------------------------------------------------------------------
 
-step "Enabling and restarting ping service"
-ssh_run "sudo systemctl enable ping"
-ssh_run "sudo systemctl restart ping"
+step "Enabling and starting watchdog service"
+ssh_run "sudo systemctl enable watchdog"
+ssh_run "sudo systemctl restart watchdog"
 
 sleep 2
 echo ""
 echo "==> Service status:"
-ssh_run "sudo systemctl status ping --no-pager --lines=10" || true
+ssh_run "sudo systemctl status watchdog --no-pager --lines=10" || true
 
 echo ""
 echo "Done."
-echo "  Journal logs: ssh ${TARGET} journalctl -u ping -f"
-echo "  Log file:     ssh ${TARGET} tail -f /var/log/ping/ping.log"
-echo "  Test reboot:  ssh -i ${WATCHDOG_KEY} watchdog@${TARGET#*@} reboot"
+echo "  Journal logs: ssh ${TARGET} journalctl -u watchdog -f"
+echo "  Log file:     ssh ${TARGET} tail -f /var/log/watchdog/watchdog.log"
