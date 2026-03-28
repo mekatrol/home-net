@@ -282,11 +282,11 @@ def publish_status(bridge: MqttBridge, state: "DeviceState") -> None:
     silence = now - state.last_seen
     threshold = cfg.miss_threshold * cfg.ping_interval
     if state.disabled or state.rebooting or silence >= threshold:
-        status = "offline"
+        status = "Offline"
     elif not state.ever_seen:
-        status = "unknown"
+        status = "Unknown"
     else:
-        status = "online"
+        status = "Online"
     bridge.publish(f"status/{cfg.mqtt_device_name}", status, retain=True, ttl=cfg.status_retain_ttl)
     log.debug(
         "[%s] Status published: status/%s = %s (retained, ttl=%s)",
@@ -319,9 +319,14 @@ async def mqtt_listener(
             if state.disabled:
                 log.debug("[%s] Ping received but device is disabled — ignoring", state.config.name)
                 continue
-            state.last_seen = time.monotonic()
+            now = time.monotonic()
+            was_online = state.ever_seen and (now - state.last_seen) < (state.config.miss_threshold * state.config.ping_interval)
+            state.last_seen = now
             state.ever_seen = True
-            log.debug("[%s] Ping received on topic '%s'", state.config.name, topic)
+            if not was_online:
+                log.info("[%s] Device back online", state.config.name)
+            else:
+                log.debug("[%s] Ping received on topic '%s'", state.config.name, topic)
             publish_status(bridge, state)
         else:
             log.debug("Untracked topic: %s", topic)
@@ -383,7 +388,7 @@ async def main() -> None:
 
     for state in states.values():
         cfg = state.config
-        bridge.publish(f"status/{cfg.mqtt_device_name}", "initialising", retain=True, ttl=cfg.status_retain_ttl)
+        bridge.publish(f"status/{cfg.mqtt_device_name}", "Initialising", retain=True, ttl=cfg.status_retain_ttl)
         log.info("[%s] Status published: initialising", cfg.name)
 
     try:
