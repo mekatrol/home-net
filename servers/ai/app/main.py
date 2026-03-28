@@ -374,6 +374,18 @@ class WatchdogServer:
                 return
 
             msg = json.loads(raw)
+
+            # Admin CLI connection
+            if msg.get("type") == "admin_auth":
+                if msg.get("token") != self._token:
+                    await ws.send(json.dumps({"type": "auth_fail", "reason": "invalid token"}))
+                    log.warning("Admin auth failed from %s — bad token", ws.remote_address)
+                    return
+                await ws.send(json.dumps({"type": "auth_ok"}))
+                log.info("Admin client connected from %s", ws.remote_address)
+                await self._handle_admin(ws)
+                return
+
             if msg.get("type") != "auth":
                 await ws.send(json.dumps({"type": "auth_fail", "reason": "expected auth message"}))
                 return
@@ -447,6 +459,67 @@ class WatchdogServer:
 
         else:
             log.debug("[%s] Unknown message type: %s", state.config.name, mtype)
+
+    async def _handle_admin(self, ws) -> None:
+        ALLOWED_COMMANDS = {"reboot", "upgrade", "upgrade_reboot"}
+        try:
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+
+                mtype = msg.get("type")
+
+                if mtype == "admin_list":
+                    devices = [
+                        {
+                            "name": s.config.name,
+                            "device_name": s.config.device_name,
+                            "type": (
+                                "mqtt" if s.config.is_mqtt_only else
+                                "http" if s.config.is_http_polled else
+                                "websocket"
+                            ),
+                            "connected": s.connected,
+                            "ever_seen": s.ever_seen,
+                            "disabled": s.disabled,
+                        }
+                        for s in self._states.values()
+                    ]
+                    await ws.send(json.dumps({"type": "device_list", "devices": devices}))
+
+                elif mtype == "admin_command":
+                    device_name = msg.get("device_name", "")
+                    command = msg.get("command", "")
+
+                    if command not in ALLOWED_COMMANDS:
+                        await ws.send(json.dumps({"type": "error", "reason": f"unknown command '{command}' — allowed: {', '.join(ALLOWED_COMMANDS)}"}))
+                        continue
+
+                    state = self._by_device_name.get(device_name)
+                    if not state:
+                        await ws.send(json.dumps({"type": "error", "reason": f"unknown device '{device_name}'"}))
+                        continue
+
+                    if not state.connected:
+                        await ws.send(json.dumps({"type": "error", "reason": f"'{device_name}' is not connected"}))
+                        continue
+
+                    sent = await send_command(state, command)
+                    if sent:
+                        await ws.send(json.dumps({"type": "ok", "message": f"Command '{command}' sent to {state.config.name}"}))
+                        log.info("Admin sent '%s' to [%s]", command, state.config.name)
+                    else:
+                        await ws.send(json.dumps({"type": "error", "reason": "failed to send command"}))
+
+                else:
+                    await ws.send(json.dumps({"type": "error", "reason": f"unknown admin message type '{mtype}'"}))
+
+        except Exception as exc:
+            log.warning("Admin client error: %s", exc)
+        finally:
+            log.info("Admin client disconnected")
 
 
 # ---------------------------------------------------------------------------
