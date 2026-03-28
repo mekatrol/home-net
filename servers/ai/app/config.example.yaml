@@ -7,8 +7,13 @@ mqtt:
   username: "watchdog"                     # omit if broker has no auth
   password: "secret"
 
+log_level: info                            # debug, info, warning, error
+status_interval: 10                        # seconds between online/offline status publishes
+
 devices:
+  # Full device with SSH reboot support
   - name: "Raspberry Pi Device"
+    mqtt_device_name: "rpi-device"
     host: "my-pi.local"
     mqtt_topic: "ping/mypi"
     ssh_user: "watchdog"
@@ -16,3 +21,12 @@ devices:
     ping_interval: 60                      # device publishes a ping every 60 s
     miss_threshold: 3                      # reboot after 3 missed pings (3 min silence)
     reboot_cooldown: 300                   # wait 5 min after reboot before re-monitoring
+    status_retain_ttl: 30                  # broker discards retained status after 30 secs min (MQTTv5)
+
+  # MicroPython / embedded device — no SSH, ping monitoring only
+  - name: "ESP32 Sensor"
+    mqtt_device_name: "esp32-sensor"
+    mqtt_topic: "ping/esp32-sensor"
+    ping_interval: 30
+    miss_threshold: 3
+    status_retain_ttl: 30                  # broker discards retained status after 30 secs min (MQTTv5)

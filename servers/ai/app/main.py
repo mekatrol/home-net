@@ -15,6 +15,8 @@ from typing import Optional
 
 import asyncssh
 import paho.mqtt.client as mqtt
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.properties import Properties
 import yaml
 
 LOG_FILE = Path("/var/log/home-monitor/watchdog.log")
@@ -49,45 +51,52 @@ log = setup_logging()
 # Config
 # ---------------------------------------------------------------------------
 
-
 @dataclass
 class DeviceConfig:
     name: str
-    host: str
     mqtt_topic: str
-    ssh_user: str
-    ssh_key: str  # path to private key file
-    ping_interval: int = 60  # seconds between expected pings
-    miss_threshold: int = 3  # missed pings before reboot
-    reboot_cooldown: int = 300  # seconds to suppress alerts after a reboot
+    mqtt_device_name: str = ""    # used in status/<mqtt_device_name>/<status>; defaults to name
+    ping_interval: int = 60       # seconds between expected pings
+    miss_threshold: int = 3       # missed pings before reboot
+    reboot_cooldown: int = 300    # seconds to suppress alerts after a reboot
+    host: Optional[str] = None    # required for SSH reboot; omit for non-SSH devices
+    ssh_user: Optional[str] = None
+    ssh_key: Optional[str] = None  # path to private key file
+    status_retain_ttl: Optional[int] = None  # seconds before retained status expires (MQTTv5)
+
+    def __post_init__(self):
+        if not self.mqtt_device_name:
+            self.mqtt_device_name = self.name
 
 
 SSH_MAX_RETRIES = 3
-SSH_RETRY_DELAY = 5  # seconds between retry attempts
+SSH_RETRY_DELAY = 5   # seconds between retry attempts
 
 
 @dataclass
 class DeviceState:
     config: DeviceConfig
     last_seen: float = field(default_factory=time.monotonic)
+    ever_seen: bool = False
     rebooting: bool = False
     reboot_at: Optional[float] = None
     disabled: bool = False
     ssh_failures: int = 0
 
 
-def load_config(path: Path) -> tuple[dict, list[DeviceConfig]]:
+def load_config(path: Path) -> tuple[dict, list[DeviceConfig], int, int]:
     with open(path) as f:
         raw = yaml.safe_load(f)
     mqtt_cfg = raw["mqtt"]
     devices = [DeviceConfig(**d) for d in raw["devices"]]
-    return mqtt_cfg, devices
+    status_interval = int(raw.get("status_interval", 10))
+    log_level = logging.getLevelName(raw.get("log_level", "INFO").upper())
+    return mqtt_cfg, devices, status_interval, log_level
 
 
 # ---------------------------------------------------------------------------
 # MQTT bridge  (paho callbacks → asyncio Queue)
 # ---------------------------------------------------------------------------
-
 
 class MqttBridge:
     def __init__(
@@ -104,7 +113,7 @@ class MqttBridge:
         self._broker = broker
         self._port = port
 
-        self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, protocol=mqtt.MQTTv5)
         if username:
             self._client.username_pw_set(username, password)
         self._client.on_connect = self._on_connect
@@ -131,9 +140,7 @@ class MqttBridge:
             self._queue.put_nowait, (msg.topic, msg.payload)
         )
 
-    def _on_disconnect(
-        self, client, userdata, disconnect_flags, reason_code, properties
-    ):
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties):
         log.warning("MQTT disconnected (reason: %s) — paho will reconnect", reason_code)
 
     # --- asyncio interface ---
@@ -147,6 +154,13 @@ class MqttBridge:
         self._client.connect_async(self._broker, self._port)
         self._client.loop_start()
 
+    def publish(self, topic: str, payload: str, retain: bool = False, ttl: Optional[int] = None) -> None:
+        props = None
+        if ttl is not None:
+            props = Properties(PacketTypes.PUBLISH)
+            props.MessageExpiryInterval = ttl
+        self._client.publish(topic, payload, retain=retain, properties=props)
+
     def stop(self) -> None:
         self._client.loop_stop()
         self._client.disconnect()
@@ -156,24 +170,19 @@ class MqttBridge:
 # SSH reboot
 # ---------------------------------------------------------------------------
 
-
 async def ssh_reboot(state: DeviceState) -> None:
     device = state.config
     for attempt in range(1, SSH_MAX_RETRIES + 1):
         log.info(
             "[%s] SSH reboot attempt %d/%d → %s@%s",
-            device.name,
-            attempt,
-            SSH_MAX_RETRIES,
-            device.ssh_user,
-            device.host,
+            device.name, attempt, SSH_MAX_RETRIES, device.ssh_user, device.host,
         )
         try:
             async with asyncssh.connect(
                 device.host,
                 username=device.ssh_user,
                 client_keys=[device.ssh_key],
-                known_hosts=None,  # fine for a trusted home network
+                known_hosts=None,           # fine for a trusted home network
                 connect_timeout=15,
             ) as conn:
                 # The remote authorized_keys forces all connections through the
@@ -183,13 +192,7 @@ async def ssh_reboot(state: DeviceState) -> None:
             state.ssh_failures = 0
             return
         except (asyncssh.Error, OSError, asyncio.TimeoutError) as exc:
-            log.warning(
-                "[%s] SSH attempt %d/%d failed: %s",
-                device.name,
-                attempt,
-                SSH_MAX_RETRIES,
-                exc,
-            )
+            log.warning("[%s] SSH attempt %d/%d failed: %s", device.name, attempt, SSH_MAX_RETRIES, exc)
             if attempt < SSH_MAX_RETRIES:
                 await asyncio.sleep(SSH_RETRY_DELAY)
 
@@ -199,15 +202,13 @@ async def ssh_reboot(state: DeviceState) -> None:
     log.error(
         "[%s] SSH reboot failed after %d attempts — device disabled. "
         "To re-enable publish the device name to MQTT topic 'watchdog/enable'",
-        device.name,
-        SSH_MAX_RETRIES,
+        device.name, SSH_MAX_RETRIES,
     )
 
 
 # ---------------------------------------------------------------------------
 # Watchdog loop
 # ---------------------------------------------------------------------------
-
 
 async def watchdog_loop(states: dict[str, DeviceState]) -> None:
     """Checks every 10 s whether any device has gone silent long enough to reboot."""
@@ -231,24 +232,34 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
                     continue
                 log.info("[%s] Cooldown elapsed, resuming monitoring", cfg.name)
                 state.rebooting = False
-                state.last_seen = now  # avoid an immediate re-trigger
+                state.last_seen = now   # avoid an immediate re-trigger
                 continue
 
             silence = now - state.last_seen
             threshold = cfg.miss_threshold * cfg.ping_interval
 
             if silence >= threshold:
-                log.warning(
-                    "[%s] Silent for %.0fs (threshold %dx%ds = %ds) — rebooting",
-                    cfg.name,
-                    silence,
-                    cfg.miss_threshold,
-                    cfg.ping_interval,
-                    threshold,
-                )
-                state.rebooting = True
-                state.reboot_at = now
-                asyncio.create_task(ssh_reboot(state))
+                if cfg.ssh_user and cfg.ssh_key and cfg.host:
+                    log.warning(
+                        "[%s] Silent for %.0fs (threshold %dx%ds = %ds) — rebooting",
+                        cfg.name,
+                        silence,
+                        cfg.miss_threshold,
+                        cfg.ping_interval,
+                        threshold,
+                    )
+                    state.rebooting = True
+                    state.reboot_at = now
+                    asyncio.create_task(ssh_reboot(state))
+                else:
+                    log.warning(
+                        "[%s] Silent for %.0fs (threshold %dx%ds = %ds) — no SSH configured, cannot reboot",
+                        cfg.name,
+                        silence,
+                        cfg.miss_threshold,
+                        cfg.ping_interval,
+                        threshold,
+                    )
             elif silence > cfg.ping_interval:
                 log.info(
                     "[%s] Overdue by %.0fs (last seen %.0fs ago)",
@@ -265,7 +276,28 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
 ENABLE_TOPIC = "watchdog/enable"
 
 
-async def mqtt_listener(bridge: MqttBridge, states: dict[str, DeviceState]) -> None:
+def publish_status(bridge: MqttBridge, state: "DeviceState") -> None:
+    cfg = state.config
+    now = time.monotonic()
+    silence = now - state.last_seen
+    threshold = cfg.miss_threshold * cfg.ping_interval
+    if state.disabled or state.rebooting or silence >= threshold:
+        status = "offline"
+    elif not state.ever_seen:
+        status = "unknown"
+    else:
+        status = "online"
+    bridge.publish(f"status/{cfg.mqtt_device_name}", status, retain=True, ttl=cfg.status_retain_ttl)
+    log.debug(
+        "[%s] Status published: status/%s = %s (retained, ttl=%s)",
+        cfg.name, cfg.mqtt_device_name, status,
+        f"{cfg.status_retain_ttl}s" if cfg.status_retain_ttl else "forever",
+    )
+
+
+async def mqtt_listener(
+    bridge: MqttBridge, states: dict[str, DeviceState]
+) -> None:
     topic_map = {s.config.mqtt_topic: s for s in states.values()}
 
     async for topic, payload in bridge.messages():
@@ -285,21 +317,33 @@ async def mqtt_listener(bridge: MqttBridge, states: dict[str, DeviceState]) -> N
         state = topic_map.get(topic)
         if state:
             if state.disabled:
-                log.debug(
-                    "[%s] Ping received but device is disabled — ignoring",
-                    state.config.name,
-                )
+                log.debug("[%s] Ping received but device is disabled — ignoring", state.config.name)
                 continue
             state.last_seen = time.monotonic()
+            state.ever_seen = True
             log.debug("[%s] Ping received on topic '%s'", state.config.name, topic)
+            publish_status(bridge, state)
         else:
             log.debug("Untracked topic: %s", topic)
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Status publisher
 # ---------------------------------------------------------------------------
 
+async def status_publisher(
+    bridge: MqttBridge, states: dict[str, DeviceState], interval: int
+) -> None:
+    """Publishes status for all devices every `interval` seconds."""
+    while True:
+        await asyncio.sleep(interval)
+        for state in states.values():
+            publish_status(bridge, state)
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 async def main() -> None:
     config_path = Path("/run/secrets/config.yaml")
@@ -307,7 +351,9 @@ async def main() -> None:
         config_path = Path(__file__).parent / "config.yaml"
 
     log.info("Loading config from %s", config_path)
-    mqtt_cfg, devices = load_config(config_path)
+    mqtt_cfg, devices, status_interval, log_level = load_config(config_path)
+    log.setLevel(log_level)
+    log.info("Log level set to %s", logging.getLevelName(log_level))
 
     loop = asyncio.get_running_loop()
     bridge = MqttBridge(
@@ -335,10 +381,17 @@ async def main() -> None:
 
     bridge.start()
 
+    for state in states.values():
+        cfg = state.config
+        bridge.publish(f"status/{cfg.mqtt_device_name}", "initialising", retain=True, ttl=cfg.status_retain_ttl)
+        log.info("[%s] Status published: initialising", cfg.name)
+
     try:
+        log.info("Publishing device status every %ds", status_interval)
         await asyncio.gather(
             mqtt_listener(bridge, states),
             watchdog_loop(states),
+            status_publisher(bridge, states, status_interval),
         )
     finally:
         bridge.stop()

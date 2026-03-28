@@ -57,6 +57,13 @@ The `command=` option forces every SSH connection using this key through the
 dispatcher, regardless of what the client requests:
 
 ```bash
+mkdir ./secrets
+nano ./secrets/watchdog_key.pub
+```
+
+> Paste the contents of ./secrets/watchdog_key.pub
+
+```bash
 PUBKEY=$(cat ./secrets/watchdog_key.pub)
 sudo tee /home/watchdog/.ssh/authorized_keys <<EOF
 command="/usr/local/bin/watchdog-dispatch",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty $PUBKEY
