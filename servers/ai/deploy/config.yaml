@@ -1,0 +1,9 @@
+mqtt:
+  broker: "mqtt.lan"
+  port: 1883
+  username: "watchdog"
+  password: "changeme"
+
+ping:
+  topic: "device/status"   # must match mqtt_topic in watchdog config.yaml
+  interval: 60             # seconds between pings (match ping_interval in watchdog config)
