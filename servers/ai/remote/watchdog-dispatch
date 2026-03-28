@@ -17,6 +17,12 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
     upgrade)
         sudo apt-get update && sudo apt-get upgrade -y
         ;;
+    upgrade_reboot)
+        sudo apt-get update
+        sudo apt-get upgrade -y
+        sudo apt-get autoremove -y
+        sudo reboot
+        ;;
     *)
         echo "watchdog-dispatch: command not permitted: '${SSH_ORIGINAL_COMMAND:-}'" >&2
         exit 1

@@ -6,6 +6,7 @@ Listens for MQTT ping topics from registered devices. If a device misses
 """
 
 import asyncio
+import datetime
 import logging
 import time
 from dataclasses import dataclass, field
@@ -63,6 +64,7 @@ class DeviceConfig:
     ssh_user: Optional[str] = None
     ssh_key: Optional[str] = None  # path to private key file
     status_retain_ttl: Optional[int] = None  # seconds before retained status expires (MQTTv5)
+    upgrade_reboot_time: Optional[str] = None  # daily upgrade+reboot time "HH:MM"; omit to disable
 
     def __post_init__(self):
         if not self.mqtt_device_name:
@@ -204,6 +206,74 @@ async def ssh_reboot(state: DeviceState) -> None:
         "To re-enable publish the device name to MQTT topic 'watchdog/enable'",
         device.name, SSH_MAX_RETRIES,
     )
+
+
+# ---------------------------------------------------------------------------
+# Scheduled upgrade + reboot
+# ---------------------------------------------------------------------------
+
+UPGRADE_REBOOT_TIMEOUT = 600  # apt upgrade can take several minutes
+
+
+async def ssh_upgrade_reboot(state: DeviceState) -> None:
+    device = state.config
+    log.info("[%s] Running scheduled upgrade_reboot → %s@%s", device.name, device.ssh_user, device.host)
+    state.rebooting = True
+    state.reboot_at = time.monotonic()
+    try:
+        async with asyncssh.connect(
+            device.host,
+            username=device.ssh_user,
+            client_keys=[device.ssh_key],
+            known_hosts=None,
+            connect_timeout=15,
+        ) as conn:
+            # Connection will be cut by the reboot at the end — that is expected
+            await conn.run("upgrade_reboot", check=False, timeout=UPGRADE_REBOOT_TIMEOUT)
+        log.info("[%s] upgrade_reboot command completed", device.name)
+    except (asyncssh.Error, OSError, asyncio.TimeoutError) as exc:
+        log.warning("[%s] upgrade_reboot SSH error: %s", device.name, exc)
+
+
+async def upgrade_reboot_scheduler(states: dict[str, "DeviceState"]) -> None:
+    """For each device with upgrade_reboot_time set, fire the command once per day at that time."""
+    scheduled = [
+        s for s in states.values()
+        if s.config.upgrade_reboot_time
+        and s.config.ssh_user
+        and s.config.ssh_key
+        and s.config.host
+    ]
+    if not scheduled:
+        return
+
+    for state in scheduled:
+        log.info(
+            "[%s] Daily upgrade+reboot scheduled at %s",
+            state.config.name, state.config.upgrade_reboot_time,
+        )
+
+    while True:
+        now = datetime.datetime.now()
+        for state in scheduled:
+            cfg = state.config
+            try:
+                h, m = map(int, cfg.upgrade_reboot_time.split(":"))
+            except ValueError:
+                log.error("[%s] Invalid upgrade_reboot_time '%s' — expected HH:MM", cfg.name, cfg.upgrade_reboot_time)
+                continue
+
+            next_run = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if next_run <= now:
+                next_run += datetime.timedelta(days=1)
+
+            delay = (next_run - now).total_seconds()
+            if delay <= 60:
+                # Within the current minute — fire now
+                asyncio.create_task(ssh_upgrade_reboot(state))
+
+        # Check again in 60 seconds
+        await asyncio.sleep(60)
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +467,7 @@ async def main() -> None:
             mqtt_listener(bridge, states),
             watchdog_loop(states),
             status_publisher(bridge, states, status_interval),
+            upgrade_reboot_scheduler(states),
         )
     finally:
         bridge.stop()

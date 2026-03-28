@@ -22,6 +22,7 @@ devices:
     miss_threshold: 3                      # reboot after 3 missed pings (3 min silence)
     reboot_cooldown: 300                   # wait 5 min after reboot before re-monitoring
     status_retain_ttl: 30                  # broker discards retained status after 30 secs min (MQTTv5)
+    upgrade_reboot_time: "02:00"           # daily apt upgrade + reboot at this time; omit to disable
 
   # MicroPython / embedded device — no SSH, ping monitoring only
   - name: "ESP32 Sensor"
