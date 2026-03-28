@@ -77,6 +77,15 @@ for key in /run/secrets/*_key; do
 done
 
 cat > /etc/supervisor/conf.d/home-monitor.conf <<EOF
+[unix_http_server]
+file=/var/run/supervisor.sock
+
+[supervisorctl]
+serverurl=unix:///var/run/supervisor.sock
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+
 [supervisord]
 nodaemon=true
 user=root
