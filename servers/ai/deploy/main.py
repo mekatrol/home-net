@@ -8,6 +8,7 @@ so the home monitor watchdog knows this device is alive.
 import logging
 import threading
 import time
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -90,7 +91,8 @@ def main() -> None:
                 log.debug("Not connected, skipping ping")
                 time.sleep(interval)
                 continue
-            result = client.publish(topic, "ping")
+            payload = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+            result = client.publish(topic, payload)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
                 log.debug("Published ping to '%s'", topic)
             else:
