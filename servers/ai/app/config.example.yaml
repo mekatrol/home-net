@@ -31,6 +31,15 @@ devices:
     miss_threshold: 3
     reboot_cooldown: 300
 
+  # HTTP-polled device — server polls a URL; 2xx = online, anything else or no answer = offline
+  - name: "Irrigation Controller"
+    http_url: "http://irrigation.lan/outputs/1"
+    mqtt_device_name: "irrigation"
+    ping_interval: 30           # poll every 30s
+    miss_threshold: 3
+    reboot_cooldown: 300
+    status_retain_ttl: 120
+
   # MQTT-only device — cannot run WebSocket client; monitored via MQTT subscription only
   # Silence triggers a warning log; reboot is not possible
   - name: "Lego Train"

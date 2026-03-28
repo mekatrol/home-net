@@ -30,6 +30,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+import aiohttp
 import paho.mqtt.client as mqtt
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.properties import Properties
@@ -103,6 +104,8 @@ class DeviceConfig:
     mqtt_topic: str = ""            # if set, device is monitored via MQTT subscription
     mqtt_device_name: str = ""      # slug for MQTT status publishing; defaults to device_name
     status_retain_ttl: Optional[int] = None  # MQTTv5 message expiry for retained status
+    # HTTP-polled device fields
+    http_url: str = ""              # if set, device is polled via HTTP GET; 2xx = online
     # Common fields
     ping_interval: int = 60
     miss_threshold: int = 3
@@ -118,6 +121,10 @@ class DeviceConfig:
     @property
     def is_mqtt_only(self) -> bool:
         return bool(self.mqtt_topic)
+
+    @property
+    def is_http_polled(self) -> bool:
+        return bool(self.http_url)
 
 
 COMMAND_TIMEOUT = 660
@@ -294,6 +301,55 @@ async def mqtt_listener(bridge: MqttBridge, states: dict[str, DeviceState]) -> N
 
 
 # ---------------------------------------------------------------------------
+# HTTP poller (for HTTP-polled devices)
+# ---------------------------------------------------------------------------
+
+HTTP_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
+
+async def _http_check(session: aiohttp.ClientSession, state: DeviceState, bridge: Optional[MqttBridge]) -> None:
+    cfg = state.config
+    try:
+        async with session.get(cfg.http_url, timeout=HTTP_TIMEOUT, ssl=False) as resp:
+            if 200 <= resp.status < 300:
+                now = time.monotonic()
+                was_online = state.ever_seen and (now - state.last_seen) < (cfg.miss_threshold * cfg.ping_interval)
+                state.last_seen = now
+                state.ever_seen = True
+                if not was_online:
+                    log.info("[%s] Device back online (HTTP %d)", cfg.name, resp.status)
+                    if bridge:
+                        publish_status(bridge, state)
+                else:
+                    log.debug("[%s] HTTP check OK (%d)", cfg.name, resp.status)
+            else:
+                log.warning("[%s] HTTP check returned %d — treating as offline", cfg.name, resp.status)
+    except Exception as exc:
+        log.debug("[%s] HTTP check failed: %s", cfg.name, exc)
+
+
+async def http_pollers(states: dict[str, DeviceState], bridge: Optional[MqttBridge]) -> None:
+    """Runs one polling loop per HTTP-polled device."""
+    http_states = [s for s in states.values() if s.config.is_http_polled]
+    if not http_states:
+        return
+
+    async def poll_device(state: DeviceState) -> None:
+        async with aiohttp.ClientSession() as session:
+            while True:
+                await _http_check(session, state, bridge)
+                await asyncio.sleep(state.config.ping_interval)
+
+    for state in http_states:
+        log.info(
+            "Watching [%s] via HTTP poll %s every %ds",
+            state.config.name, state.config.http_url, state.config.ping_interval,
+        )
+
+    await asyncio.gather(*[poll_device(s) for s in http_states])
+
+
+# ---------------------------------------------------------------------------
 # WebSocket handler (for WebSocket devices)
 # ---------------------------------------------------------------------------
 
@@ -305,7 +361,7 @@ class WatchdogServer:
         self._by_device_name: dict[str, DeviceState] = {
             s.config.device_name: s
             for s in states.values()
-            if not s.config.is_mqtt_only
+            if not s.config.is_mqtt_only and not s.config.is_http_polled
         }
 
     async def handle(self, ws) -> None:
@@ -455,9 +511,9 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
             threshold = cfg.miss_threshold * cfg.ping_interval
 
             if silence >= threshold:
-                if cfg.is_mqtt_only:
+                if cfg.is_mqtt_only or cfg.is_http_polled:
                     log.warning(
-                        "[%s] Silent for %.0fs (threshold %dx%ds=%ds) — MQTT-only device, cannot reboot",
+                        "[%s] Silent for %.0fs (threshold %dx%ds=%ds) — no reboot capability",
                         cfg.name, silence, cfg.miss_threshold, cfg.ping_interval, threshold,
                     )
                 elif state.connected:
@@ -537,6 +593,8 @@ async def main() -> None:
                 "Watching [%s] via MQTT topic '%s' (alert after %dx%ds silence)",
                 dev.name, dev.mqtt_topic, dev.miss_threshold, dev.ping_interval,
             )
+        elif dev.is_http_polled:
+            pass  # logged by http_pollers() at startup
         else:
             log.info(
                 "Watching [%s] via WebSocket (device_name=%s, reboot after %dx%ds silence)",
@@ -582,6 +640,8 @@ async def main() -> None:
         mqtt_devices = [d for d in devices if d.is_mqtt_only]
         if mqtt_devices:
             log.error("MQTT devices configured but no 'mqtt' section in config — they will not be monitored")
+
+    tasks.append(http_pollers(states, bridge))
 
     ssl_ctx = ensure_tls_cert()
     ws_server = WatchdogServer(states, token, bridge)
