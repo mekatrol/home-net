@@ -95,6 +95,8 @@ ssh-keygen -A
 service ssh start
 /configure_reverse_proxy.sh
 
+[ -f /opt/watchdog/.venv/bin/python ] && sudo -u watchdog bash -c 'nohup /opt/watchdog/.venv/bin/python /opt/watchdog/main.py >> /var/log/watchdog/watchdog.log 2>&1 &'
+
 nginx -t
 nginx -g 'daemon off;' &
 /scripts/renew_certs.sh

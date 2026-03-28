@@ -24,6 +24,17 @@ devices:
     miss_threshold: 3
     reboot_cooldown: 300
     upgrade_reboot_time: "02:00"    # daily apt upgrade + reboot; omit to disable
+    # upgrade_time: "02:40"         # daily apt upgrade, no reboot (for containers); omit to disable
+
+  # Container device — WS-connected but runs in Docker; no reboot, uses restart_container instead
+  - name: "My Container"
+    device_name: "my-container"
+    ping_interval: 30
+    miss_threshold: 3
+    reboot_cooldown: 300
+    upgrade_time: "02:40"             # daily upgrade, no reboot
+    container_device_name: "pi-nas"   # device_name of the docker host running this container
+    container_name: "my-container"    # docker container name to restart
 
   - name: "NTP Server"
     device_name: "ntp"

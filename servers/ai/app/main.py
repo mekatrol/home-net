@@ -28,7 +28,7 @@ import uuid
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Coroutine, Optional
 
 import aiohttp
 import paho.mqtt.client as mqtt
@@ -111,6 +111,9 @@ class DeviceConfig:
     miss_threshold: int = 3
     reboot_cooldown: int = 300
     upgrade_reboot_time: Optional[str] = None  # "HH:MM" daily upgrade+reboot (WS devices only)
+    upgrade_time: Optional[str] = None         # "HH:MM" daily upgrade, no reboot (WS devices only)
+    container_device_name: Optional[str] = None  # device_name of docker host; enables restart_container
+    container_name: Optional[str] = None          # docker container name to restart
 
     def __post_init__(self):
         if not self.device_name:
@@ -140,6 +143,7 @@ class DeviceState:
     disabled: bool = False
     pending_command_id: Optional[str] = None
     pending_command_at: Optional[float] = None
+    pending_command_callback: Optional[Callable[[bool], Coroutine[Any, Any, None]]] = None
     ws: Optional[object] = None
 
     @property
@@ -454,14 +458,18 @@ class WatchdogServer:
                 (output or "")[:200], (error or "")[:200],
             )
             if state.pending_command_id == cmd_id:
+                cb = state.pending_command_callback
                 state.pending_command_id = None
                 state.pending_command_at = None
+                state.pending_command_callback = None
+                if cb:
+                    asyncio.create_task(cb(success))
 
         else:
             log.debug("[%s] Unknown message type: %s", state.config.name, mtype)
 
     async def _handle_admin(self, ws) -> None:
-        ALLOWED_COMMANDS = {"reboot", "upgrade", "upgrade_reboot"}
+        ALLOWED_COMMANDS = {"reboot", "upgrade", "upgrade_reboot", "restart_container"}
         try:
             async for raw in ws:
                 try:
@@ -500,6 +508,18 @@ class WatchdogServer:
                     state = self._by_device_name.get(device_name)
                     if not state:
                         await ws.send(json.dumps({"type": "error", "reason": f"unknown device '{device_name}'"}))
+                        continue
+
+                    if command == "restart_container":
+                        if not state.config.container_device_name:
+                            await ws.send(json.dumps({"type": "error", "reason": f"'{device_name}' has no container_device_name configured"}))
+                            continue
+                        sent = await send_restart_container(state, self._by_device_name)
+                        if sent:
+                            await ws.send(json.dumps({"type": "ok", "message": f"restart_container sent for {state.config.name} via {state.config.container_device_name}"}))
+                            log.info("Admin sent 'restart_container' for [%s] via [%s]", state.config.name, state.config.container_device_name)
+                        else:
+                            await ws.send(json.dumps({"type": "error", "reason": "failed to send restart_container"}))
                         continue
 
                     if not state.connected:
@@ -547,6 +567,23 @@ async def send_command(state: DeviceState, command: str) -> bool:
         state.pending_command_id = None
         state.pending_command_at = None
         return False
+
+
+async def send_restart_container(container_state: DeviceState, by_device_name: dict[str, "DeviceState"]) -> bool:
+    """Route a restart_container command to the docker host device."""
+    host_name = container_state.config.container_device_name
+    cname = container_state.config.container_name
+    if not host_name or not cname:
+        log.warning("[%s] restart_container: container_device_name/container_name not configured", container_state.config.name)
+        return False
+    host_state = by_device_name.get(host_name)
+    if not host_state:
+        log.warning("[%s] restart_container: host device '%s' not found", container_state.config.name, host_name)
+        return False
+    if not host_state.connected:
+        log.warning("[%s] restart_container: host device '%s' not connected", container_state.config.name, host_name)
+        return False
+    return await send_command(host_state, f"restart_container:{cname}")
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +644,55 @@ async def watchdog_loop(states: dict[str, DeviceState]) -> None:
                     "[%s] Overdue by %.0fs (last seen %.0fs ago)",
                     cfg.name, silence - cfg.ping_interval, silence,
                 )
+
+
+# ---------------------------------------------------------------------------
+# Scheduled upgrade (no reboot)
+# ---------------------------------------------------------------------------
+
+async def upgrade_scheduler(states: dict[str, DeviceState]) -> None:
+    scheduled = [
+        s for s in states.values()
+        if s.config.upgrade_time and not s.config.is_mqtt_only
+    ]
+    if not scheduled:
+        return
+
+    for state in scheduled:
+        log.info("[%s] Daily upgrade scheduled at %s", state.config.name, state.config.upgrade_time)
+
+    while True:
+        now = datetime.datetime.now()
+        for state in scheduled:
+            try:
+                h, m = map(int, state.config.upgrade_time.split(":"))
+            except ValueError:
+                log.error("[%s] Invalid upgrade_time '%s'", state.config.name, state.config.upgrade_time)
+                continue
+
+            target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+            if target <= now:
+                target += datetime.timedelta(days=1)
+
+            if (target - now).total_seconds() <= 60:
+                log.info("[%s] Triggering scheduled upgrade", state.config.name)
+                if state.config.container_device_name and state.config.container_name:
+                    by_device_name = {
+                        s.config.device_name: s for s in states.values()
+                        if not s.config.is_mqtt_only and not s.config.is_http_polled
+                    }
+
+                    async def _restart_after_upgrade(success: bool, _state=state, _bdn=by_device_name) -> None:
+                        if success:
+                            log.info("[%s] Upgrade succeeded — restarting container", _state.config.name)
+                            await send_restart_container(_state, _bdn)
+                        else:
+                            log.warning("[%s] Upgrade failed — skipping container restart", _state.config.name)
+
+                    state.pending_command_callback = _restart_after_upgrade
+                asyncio.create_task(send_command(state, "upgrade"))
+
+        await asyncio.sleep(60)
 
 
 # ---------------------------------------------------------------------------
@@ -680,6 +766,7 @@ async def main() -> None:
 
     tasks: list = [
         watchdog_loop(states),
+        upgrade_scheduler(states),
         upgrade_reboot_scheduler(states),
     ]
 

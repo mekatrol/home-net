@@ -171,6 +171,7 @@ ssh_run "sudo chmod 440 /etc/sudoers.d/watchdog"
 # ---------------------------------------------------------------------------
 
 step "Installing Python system dependencies"
+ssh_run "sudo apt-get update -q"
 ssh_run "sudo apt-get install -y -q python3-pip python3-venv"
 
 # ---------------------------------------------------------------------------
@@ -217,27 +218,38 @@ ssh_run "sudo -u watchdog python3 -m venv /opt/watchdog/.venv"
 ssh_run "sudo -u watchdog /opt/watchdog/.venv/bin/pip install --quiet --no-cache-dir -r /opt/watchdog/requirements.txt"
 
 # ---------------------------------------------------------------------------
-# 8. Install systemd service
+# 8 & 9. Install systemd service (skipped in containers without systemd)
 # ---------------------------------------------------------------------------
 
-step "Installing systemd service"
-scp_file "$REMOTE_DIR/watchdog.service" /etc/systemd/system/watchdog.service
-ssh_run "sudo systemctl daemon-reload"
+HAS_SYSTEMD=$(ssh_run "ps -p 1 -o comm=" 2>/dev/null | grep -q systemd && echo yes || echo no)
 
-# ---------------------------------------------------------------------------
-# 9. Enable and restart service
-# ---------------------------------------------------------------------------
+if [ "$HAS_SYSTEMD" = "yes" ]; then
+    step "Installing systemd service"
+    scp_file "$REMOTE_DIR/watchdog.service" /etc/systemd/system/watchdog.service
+    ssh_run "sudo systemctl daemon-reload"
 
-step "Enabling and starting watchdog service"
-ssh_run "sudo systemctl enable watchdog"
-ssh_run "sudo systemctl restart watchdog"
+    step "Enabling and starting watchdog service"
+    ssh_run "sudo systemctl enable watchdog"
+    ssh_run "sudo systemctl restart watchdog"
 
-sleep 2
-echo ""
-echo "==> Service status:"
-ssh_run "sudo systemctl status watchdog --no-pager --lines=10" || true
+    sleep 2
+    echo ""
+    echo "==> Service status:"
+    ssh_run "sudo systemctl status watchdog --no-pager --lines=10" || true
 
-echo ""
-echo "Done."
-echo "  Journal logs: ssh ${TARGET} journalctl -u watchdog -f"
-echo "  Log file:     ssh ${TARGET} tail -f /var/log/watchdog/watchdog.log"
+    echo ""
+    echo "Done."
+    echo "  Journal logs: ssh ${TARGET} journalctl -u watchdog -f"
+    echo "  Log file:     ssh ${TARGET} tail -f /var/log/watchdog/watchdog.log"
+else
+    echo ""
+    echo "  No systemd detected (container) — skipping auto-start configuration."
+    echo "  Starting watchdog now..."
+    ssh_run "sudo -u watchdog bash -c 'nohup /opt/watchdog/.venv/bin/python /opt/watchdog/main.py >> /var/log/watchdog/watchdog.log 2>&1 &'"
+    echo ""
+    echo "Done."
+    echo "  To start on boot, add this to your container boot script:"
+    echo "    [ -f /opt/watchdog/.venv/bin/python ] && sudo -u watchdog bash -c 'nohup /opt/watchdog/.venv/bin/python /opt/watchdog/main.py >> /var/log/watchdog/watchdog.log 2>&1 &'"
+    echo ""
+    echo "  Log file: ssh ${TARGET} tail -f /var/log/watchdog/watchdog.log"
+fi

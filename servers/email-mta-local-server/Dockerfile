@@ -371,6 +371,7 @@ RUN echo "#!/bin/bash\n\
     sudo service postgresql start\n\
     sudo service postfix start\n\
     sudo service dovecot start\n\
+    [ -f /opt/watchdog/.venv/bin/python ] && sudo -u watchdog bash -c 'nohup /opt/watchdog/.venv/bin/python /opt/watchdog/main.py >> /var/log/watchdog/watchdog.log 2>&1 &'\n\
     sudo nginx -g 'daemon off;'\n\
     tail -f /var/log/mail.log" > /start.sh && chmod +x /start.sh
 

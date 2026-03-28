@@ -100,11 +100,13 @@ remote_handler.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
 
 ALLOWED_COMMANDS = {"reboot", "upgrade", "upgrade_reboot"}
 UPGRADE_TIMEOUT = 600  # seconds; apt upgrade can be slow
+DOCKER_TIMEOUT = 60    # seconds; docker restart should be fast
 
 
 async def run_command(command: str) -> tuple[bool, str, str]:
     """Execute an allowed system command. Returns (success, stdout, stderr)."""
-    if command not in ALLOWED_COMMANDS:
+    is_restart_container = command.startswith("restart_container:")
+    if command not in ALLOWED_COMMANDS and not is_restart_container:
         return False, "", f"command not allowed: {command}"
 
     try:
@@ -114,7 +116,7 @@ async def run_command(command: str) -> tuple[bool, str, str]:
             return True, "", ""
 
         if command == "upgrade":
-            ok, out, err = await _apt_update_upgrade()
+            ok, out, err = await _apt_update_upgrade(autoremove=True)
             return ok, out, err
 
         if command == "upgrade_reboot":
@@ -122,6 +124,10 @@ async def run_command(command: str) -> tuple[bool, str, str]:
             if ok:
                 await asyncio.create_subprocess_exec("sudo", "/sbin/reboot")
             return ok, out, err
+
+        if is_restart_container:
+            container = command.split(":", 1)[1]
+            return await _docker_restart(container)
 
     except asyncio.TimeoutError:
         return False, "", "command timed out"
@@ -132,6 +138,19 @@ async def run_command(command: str) -> tuple[bool, str, str]:
 
 
 APT_ENV = {"DEBIAN_FRONTEND": "noninteractive", "PATH": "/usr/bin:/usr/sbin:/bin:/sbin"}
+
+
+async def _docker_restart(container: str) -> tuple[bool, str, str]:
+    proc = await asyncio.create_subprocess_exec(
+        "docker", "container", "restart", container,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await asyncio.wait_for(proc.communicate(), timeout=DOCKER_TIMEOUT)
+    out_s, err_s = out.decode()[:2000], err.decode()[:500]
+    if proc.returncode != 0:
+        return False, out_s, f"docker restart failed (rc={proc.returncode}): {err_s}"
+    return True, out_s, ""
 
 
 async def _apt_update_upgrade(autoremove: bool = False) -> tuple[bool, str, str]:
