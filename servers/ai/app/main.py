@@ -146,6 +146,7 @@ class EmailConfig:
     smtp_port: int = 587
     poll_interval: int = 60
     store_dir: str = "/var/lib/emails"
+    sent_retention_days: int = 10  # delete sent/ files older than this many days (0 = keep forever)
     catchall: dict = field(default_factory=dict)  # {domain: catchall_address}
 
 
@@ -748,6 +749,35 @@ async def inbox_processor(cfg: EmailConfig) -> None:
         await asyncio.sleep(INBOX_SCAN_INTERVAL)
 
 
+SENT_CLEAN_INTERVAL = 3600  # seconds between sent/ cleanup scans
+
+
+async def sent_cleaner(cfg: EmailConfig) -> None:
+    """Delete files from sent/ that are older than cfg.sent_retention_days days.
+
+    Runs once per hour. If sent_retention_days is 0, does nothing.
+    """
+    if cfg.sent_retention_days <= 0:
+        log.info("Sent cleaner: retention disabled (sent_retention_days=0)")
+        return
+
+    sent_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username) / "sent"
+    sent_dir.mkdir(parents=True, exist_ok=True)
+    log.info("Sent cleaner started — deleting sent/ files older than %d days, checking every %ds",
+             cfg.sent_retention_days, SENT_CLEAN_INTERVAL)
+
+    while True:
+        try:
+            cutoff = datetime.datetime.now().timestamp() - cfg.sent_retention_days * 86400
+            for eml_path in sent_dir.glob("*.eml"):
+                if eml_path.stat().st_mtime < cutoff:
+                    eml_path.unlink()
+                    log.info("Sent cleaner: deleted %s (older than %d days)", eml_path.name, cfg.sent_retention_days)
+        except Exception as exc:
+            log.warning("Sent cleaner error: %s", exc)
+        await asyncio.sleep(SENT_CLEAN_INTERVAL)
+
+
 def _send_email_sync(cfg: EmailConfig, to: str, subject: str, body: str) -> None:
     """Send an email via SMTP with STARTTLS (synchronous — run in executor)."""
     msg = MIMEMultipart()
@@ -992,6 +1022,7 @@ async def main() -> None:
     if email_cfg:
         tasks.append(email_poller(email_cfg))
         tasks.append(inbox_processor(email_cfg))
+        tasks.append(sent_cleaner(email_cfg))
         log.info("Email enabled — %s (POP3 port %d, SMTP port %d)", email_cfg.host, email_cfg.pop3_port, email_cfg.smtp_port)
     else:
         log.info("No email config — email polling disabled")
