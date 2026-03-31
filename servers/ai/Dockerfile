@@ -49,6 +49,9 @@ RUN mkdir -p /var/log/home-monitor && chown ${SSH_USER_NAME}:${SSH_USER_NAME} /v
 # TLS cert directory — persists self-signed cert across restarts
 RUN mkdir -p /var/lib/watchdog-server
 
+# Email store — mounted as a volume at runtime so emails persist across rebuilds
+RUN mkdir -p /var/lib/emails
+
 # Install app into its own venv
 COPY app/ /opt/monitor/
 RUN python3 -m venv /opt/monitor/.venv && \
@@ -67,8 +70,9 @@ echo "$SSH_USER_NAME:$SSH_USER_PASSWORD" | chpasswd
 
 service ssh start
 
-# Fix log directory ownership — the volume mount overwrites build-time chown
+# Fix directory ownership — volume mounts overwrite build-time chown
 chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/log/home-monitor
+chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/lib/emails
 
 # Generate self-signed TLS cert for WebSocket server if not already present
 if [ ! -f /var/lib/watchdog-server/server.crt ]; then

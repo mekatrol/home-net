@@ -77,6 +77,7 @@ docker run \
     --dns "$DNSHOST" \
     -v "$PWD/secrets:/run/secrets:ro" \
     -v "$PWD/logs:/var/log/home-monitor" \
+    -v "$PWD/emails:/var/lib/emails" \
     -e SSH_USER_NAME="$SSH_USER_NAME" \
     -e SSH_USER_PASSWORD="$SSH_USER_PASSWORD" \
     "$IMAGE_REF"

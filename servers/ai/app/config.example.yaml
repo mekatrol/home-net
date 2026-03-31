@@ -13,6 +13,24 @@ mqtt:
   username: "watchdog"
   password: "secret"
 
+# Email — optional; enables POP3 polling and SMTP sending
+# email:
+#   host: "mail.example.com"
+#   username: "user@example.com"
+#   password: "secret"
+#   pop3_port: 995                  # SSL/TLS (default)
+#   smtp_port: 587                  # STARTTLS (default)
+#   poll_interval: 60               # seconds between POP3 polls (default)
+#   store_dir: "/var/lib/emails"    # host path mounted via create.sh volume (default)
+#   catchall:                       # per-domain forward address; omit to disable forwarding
+#     example.com: "catchall@example.com"
+#     otherdomain.net: "catchall@otherdomain.net"
+#
+# Folder layout per account:
+#   {store_dir}/{normalized_address}/inbox/   — received, pending forward
+#   {store_dir}/{normalized_address}/sent/    — forwarded successfully
+# Files are written atomically (.tmp → rename) before forwarding.
+
 log_level: info
 status_interval: 10   # seconds between MQTT status publishes for all devices
 

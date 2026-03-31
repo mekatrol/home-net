@@ -30,6 +30,13 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
 
+import email as email_lib
+import functools
+import poplib
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import aiohttp
 import paho.mqtt.client as mqtt
 from paho.mqtt.packettypes import PacketTypes
@@ -130,6 +137,33 @@ class DeviceConfig:
         return bool(self.http_url)
 
 
+@dataclass
+class EmailConfig:
+    host: str
+    username: str
+    password: str
+    pop3_port: int = 995
+    smtp_port: int = 587
+    poll_interval: int = 60
+    store_dir: str = "/var/lib/emails"
+    catchall: dict = field(default_factory=dict)  # {domain: catchall_address}
+
+
+def normalize_email_path(address: str) -> str:
+    """Return a filesystem-safe directory name derived from an email address.
+
+    The domain part has dots replaced with underscores; the local part is
+    appended unchanged, separated by an underscore:
+
+      user.name@wojcik.com.au  →  wojcik_com_au_user.name
+      test@test.com            →  test_com_test
+    """
+    if "@" not in address:
+        return address.replace(".", "_")
+    local, domain = address.rsplit("@", 1)
+    return f"{domain.replace('.', '_')}_{local}"
+
+
 COMMAND_TIMEOUT = 660
 
 
@@ -153,7 +187,7 @@ class DeviceState:
         return self.ws is not None
 
 
-def load_config(path: Path) -> tuple[dict, Optional[dict], list[DeviceConfig], int, int]:
+def load_config(path: Path) -> tuple[dict, Optional[dict], list[DeviceConfig], int, int, Optional[EmailConfig]]:
     with open(path) as f:
         raw = yaml.safe_load(f)
     server_cfg = raw["server"]
@@ -161,7 +195,10 @@ def load_config(path: Path) -> tuple[dict, Optional[dict], list[DeviceConfig], i
     devices = [DeviceConfig(**d) for d in raw["devices"]]
     log_level = logging.getLevelName(raw.get("log_level", "INFO").upper())
     status_interval = int(raw.get("status_interval", 10))
-    return server_cfg, mqtt_cfg, devices, log_level, status_interval
+    email_cfg: Optional[EmailConfig] = None
+    if "email" in raw:
+        email_cfg = EmailConfig(**raw["email"])
+    return server_cfg, mqtt_cfg, devices, log_level, status_interval, email_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +643,136 @@ async def send_restart_container(container_state: DeviceState, by_device_name: d
 
 
 # ---------------------------------------------------------------------------
+# Email (POP3 receive + SMTP send)
+# ---------------------------------------------------------------------------
+
+def _fetch_emails_sync(cfg: EmailConfig) -> list[tuple[email_lib.message.Message, bytes]]:
+    """Fetch and delete all messages from POP3 server (synchronous — run in executor)."""
+    results: list[tuple[email_lib.message.Message, bytes]] = []
+    conn = poplib.POP3_SSL(cfg.host, cfg.pop3_port)
+    try:
+        conn.user(cfg.username)
+        conn.pass_(cfg.password)
+        count, _ = conn.stat()
+        for i in range(1, count + 1):
+            raw_lines = conn.retr(i)[1]
+            raw = b"\r\n".join(raw_lines)
+            results.append((email_lib.message_from_bytes(raw), raw))
+            conn.dele(i)
+    finally:
+        conn.quit()
+    return results
+
+
+def _forward_email_sync(cfg: EmailConfig, to: str, raw: bytes) -> None:
+    """Forward a raw email to `to` via SMTP STARTTLS (synchronous — run in executor)."""
+    with smtplib.SMTP(cfg.host, cfg.smtp_port) as smtp:
+        smtp.starttls()
+        smtp.login(cfg.username, cfg.password)
+        smtp.sendmail(cfg.username, to, raw)
+
+
+async def email_poller(cfg: EmailConfig) -> None:
+    """Poll the POP3 mailbox every cfg.poll_interval seconds.
+
+    Each message is written atomically to inbox/ via a .tmp-then-rename so
+    inbox_processor only ever sees fully written files.
+    """
+    loop = asyncio.get_running_loop()
+    inbox_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username) / "inbox"
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+    log.info(
+        "Email poller started — polling %s:%d every %ds, inbox: %s",
+        cfg.host, cfg.pop3_port, cfg.poll_interval, inbox_dir,
+    )
+    while True:
+        try:
+            results = await loop.run_in_executor(None, functools.partial(_fetch_emails_sync, cfg))
+            for msg, raw in results:
+                subject = msg.get("Subject", "(no subject)")
+                sender = msg.get("From", "(unknown)")
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                tmp_path = inbox_dir / f"{timestamp}.eml.tmp"
+                eml_path = inbox_dir / f"{timestamp}.eml"
+                tmp_path.write_bytes(raw)
+                tmp_path.rename(eml_path)
+                log.info("Email received from %s: %s → inbox/%s", sender, subject, eml_path.name)
+        except Exception as exc:
+            log.warning("Email poll error: %s", exc)
+        await asyncio.sleep(cfg.poll_interval)
+
+
+INBOX_SCAN_INTERVAL = 10  # seconds between inbox scans
+
+
+async def inbox_processor(cfg: EmailConfig) -> None:
+    """Scan inbox/ every INBOX_SCAN_INTERVAL seconds and forward any .eml files.
+
+    Handles both emails written by email_poller and any files placed manually.
+    Successfully forwarded files are moved to sent/; failures stay in inbox/
+    and are retried on the next scan.
+    """
+    loop = asyncio.get_running_loop()
+    base_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username)
+    inbox_dir = base_dir / "inbox"
+    sent_dir = base_dir / "sent"
+    inbox_dir.mkdir(parents=True, exist_ok=True)
+    sent_dir.mkdir(parents=True, exist_ok=True)
+
+    domain = cfg.username.split("@")[1] if "@" in cfg.username else ""
+    catchall_to: Optional[str] = cfg.catchall.get(domain) if cfg.catchall else None
+
+    if catchall_to:
+        log.info("Inbox processor started — forwarding %s → %s, scanning every %ds", domain, catchall_to, INBOX_SCAN_INTERVAL)
+    else:
+        log.info("Inbox processor: no catchall for '%s' — inbox scanning disabled", domain)
+        return
+
+    while True:
+        try:
+            for eml_path in sorted(inbox_dir.glob("*.eml")):
+                raw = eml_path.read_bytes()
+                try:
+                    await loop.run_in_executor(
+                        None, functools.partial(_forward_email_sync, cfg, catchall_to, raw)
+                    )
+                    eml_path.rename(sent_dir / eml_path.name)
+                    log.info("Inbox processor: forwarded to %s → sent/%s", catchall_to, eml_path.name)
+                except Exception as fwd_exc:
+                    log.warning(
+                        "Inbox processor: forward to %s failed — %s will retry: %s",
+                        catchall_to, eml_path.name, fwd_exc,
+                    )
+        except Exception as exc:
+            log.warning("Inbox processor error: %s", exc)
+        await asyncio.sleep(INBOX_SCAN_INTERVAL)
+
+
+def _send_email_sync(cfg: EmailConfig, to: str, subject: str, body: str) -> None:
+    """Send an email via SMTP with STARTTLS (synchronous — run in executor)."""
+    msg = MIMEMultipart()
+    msg["From"] = cfg.username
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+    with smtplib.SMTP(cfg.host, cfg.smtp_port) as smtp:
+        smtp.starttls()
+        smtp.login(cfg.username, cfg.password)
+        smtp.send_message(msg)
+
+
+async def send_email(cfg: EmailConfig, to: str, subject: str, body: str) -> bool:
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, functools.partial(_send_email_sync, cfg, to, subject, body))
+        log.info("Email sent to %s: %s", to, subject)
+        return True
+    except Exception as exc:
+        log.warning("Failed to send email to %s: %s", to, exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Watchdog loop
 # ---------------------------------------------------------------------------
 
@@ -759,7 +926,7 @@ async def main() -> None:
         config_path = Path(__file__).parent / "config.yaml"
 
     log.info("Loading config from %s", config_path)
-    server_cfg, mqtt_cfg, devices, log_level, status_interval = load_config(config_path)
+    server_cfg, mqtt_cfg, devices, log_level, status_interval, email_cfg = load_config(config_path)
     log.setLevel(log_level)
     log.info("Log level set to %s", logging.getLevelName(log_level))
 
@@ -821,6 +988,13 @@ async def main() -> None:
             log.error("MQTT devices configured but no 'mqtt' section in config — they will not be monitored")
 
     tasks.append(http_pollers(states, bridge))
+
+    if email_cfg:
+        tasks.append(email_poller(email_cfg))
+        tasks.append(inbox_processor(email_cfg))
+        log.info("Email enabled — %s (POP3 port %d, SMTP port %d)", email_cfg.host, email_cfg.pop3_port, email_cfg.smtp_port)
+    else:
+        log.info("No email config — email polling disabled")
 
     ssl_ctx = ensure_tls_cert()
     ws_server = WatchdogServer(states, token, bridge)
