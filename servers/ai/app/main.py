@@ -137,6 +137,8 @@ COMMAND_TIMEOUT = 660
 class DeviceState:
     config: DeviceConfig
     last_seen: float = field(default_factory=time.monotonic)
+    last_seen_wall: Optional[datetime.datetime] = None
+    last_online_wall: Optional[datetime.datetime] = None
     ever_seen: bool = False
     rebooting: bool = False
     reboot_at: Optional[float] = None
@@ -258,9 +260,22 @@ def publish_status(bridge: MqttBridge, state: DeviceState) -> None:
     else:
         status = "Online"
 
+    now_wall = datetime.datetime.now(datetime.timezone.utc)
+    if status == "Online":
+        state.last_online_wall = now_wall
+
+    def _iso(dt: Optional[datetime.datetime]) -> Optional[str]:
+        return dt.isoformat() if dt is not None else None
+
+    payload = json.dumps({
+        "lastStatus": status,
+        "lastStatusTimestamp": _iso(state.last_seen_wall),
+        "lastOnlineTimestamp": _iso(state.last_online_wall),
+    })
+
     bridge.publish(
         f"status/{cfg.mqtt_device_name}",
-        status,
+        payload,
         retain=True,
         ttl=cfg.status_retain_ttl,
     )
@@ -294,6 +309,7 @@ async def mqtt_listener(bridge: MqttBridge, states: dict[str, DeviceState]) -> N
             now = time.monotonic()
             was_online = state.ever_seen and (now - state.last_seen) < (state.config.miss_threshold * state.config.ping_interval)
             state.last_seen = now
+            state.last_seen_wall = datetime.datetime.now(datetime.timezone.utc)
             state.ever_seen = True
             if not was_online:
                 log.info("[%s] Device back online (MQTT)", state.config.name)
@@ -319,6 +335,7 @@ async def _http_check(session: aiohttp.ClientSession, state: DeviceState, bridge
                 now = time.monotonic()
                 was_online = state.ever_seen and (now - state.last_seen) < (cfg.miss_threshold * cfg.ping_interval)
                 state.last_seen = now
+                state.last_seen_wall = datetime.datetime.now(datetime.timezone.utc)
                 state.ever_seen = True
                 if not was_online:
                     log.info("[%s] Device back online (HTTP %d)", cfg.name, resp.status)
@@ -408,6 +425,7 @@ class WatchdogServer:
 
             state.ws = ws
             state.last_seen = time.monotonic()
+            state.last_seen_wall = datetime.datetime.now(datetime.timezone.utc)
             state.ever_seen = True
             await ws.send(json.dumps({"type": "auth_ok"}))
             log.info("[%s] Connected from %s", state.config.name, ws.remote_address)
@@ -436,6 +454,7 @@ class WatchdogServer:
 
         if mtype == "heartbeat":
             state.last_seen = time.monotonic()
+            state.last_seen_wall = datetime.datetime.now(datetime.timezone.utc)
             state.ever_seen = True
             log.debug("[%s] Heartbeat", state.config.name)
 
@@ -792,7 +811,7 @@ async def main() -> None:
         for state in states.values():
             bridge.publish(
                 f"status/{state.config.mqtt_device_name}",
-                "Initialising",
+                json.dumps({"lastStatus": "Initialising", "lastStatusTimestamp": None, "lastOnlineTimestamp": None}),
                 retain=True,
                 ttl=state.config.status_retain_ttl,
             )
