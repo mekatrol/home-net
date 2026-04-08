@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(./destroy.sh)",
-      "Bash(SSH_USER_NAME=\"ssh\" SSH_USER_PASSWORD=\"pwd\" HOSTNAME=\"ai.lan\" DNSHOST=\"9.9.9.9\" TIMEZONE=\"Australia/Sydney\" ./create.sh)"
-    ]
-  }
-}
