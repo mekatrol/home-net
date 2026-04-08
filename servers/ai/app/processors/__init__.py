@@ -1,3 +1,80 @@
-from .spam_detector import process_email
+import json
+from pathlib import Path
+from typing import Callable, Optional
 
-__all__ = ["process_email"]
+from watchdog_logging import log
+
+from .redirection_detector import process_email as run_redirection_detector
+from .spam_detector import process_email as run_spam_detector
+
+ProcessorContext = dict[str, str]
+Subprocessor = Callable[[Path, ProcessorContext], bool]
+
+SUBPROCESSORS: tuple[tuple[str, Subprocessor], ...] = (
+    ("spam detector", run_spam_detector),
+    ("redirection detector", run_redirection_detector),
+)
+
+
+def metadata_path_for(email_path: Path) -> Path:
+    return email_path.with_suffix(f"{email_path.suffix}.meta.json")
+
+
+def process_email(
+    source_path: Path, destination_dir: Path, context: ProcessorContext
+) -> Optional[Path]:
+    """Claim a staged email, run the subprocessor chain, and persist the result."""
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    locked_path = source_path.with_suffix(f"{source_path.suffix}.locked")
+    try:
+        source_path.rename(locked_path)
+    except FileNotFoundError:
+        return None
+
+    for processor_name, processor in SUBPROCESSORS:
+        try:
+            should_continue = processor(locked_path, context)
+        except Exception as exc:
+            log.warning(
+                "Processor '%s' failed for %s; continuing: %s",
+                processor_name,
+                locked_path.name,
+                exc,
+            )
+            should_continue = True
+
+        if not should_continue:
+            break
+
+    destination_path = destination_dir / source_path.name
+    tmp_path = destination_dir / f"{source_path.name}.tmp"
+    metadata_path = metadata_path_for(destination_path)
+    tmp_metadata_path = metadata_path_for(tmp_path)
+    try:
+        tmp_path.write_bytes(locked_path.read_bytes())
+        tmp_path.rename(destination_path)
+
+        tmp_metadata_path.write_text(
+            json.dumps(context),
+            encoding="utf-8",
+        )
+        tmp_metadata_path.rename(metadata_path)
+
+        locked_path.unlink()
+        return destination_path
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        if tmp_metadata_path.exists():
+            tmp_metadata_path.unlink()
+        if metadata_path.exists():
+            metadata_path.unlink()
+        try:
+            locked_path.rename(source_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+__all__ = ["metadata_path_for", "process_email"]

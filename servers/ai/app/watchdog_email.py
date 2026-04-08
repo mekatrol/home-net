@@ -2,13 +2,14 @@ import asyncio
 import datetime
 import email as email_lib
 import functools
+import json
 import poplib
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-from processors import process_email
+from processors import metadata_path_for, process_email
 from watchdog_logging import log
 from watchdog_models import EmailConfig, normalize_email_path
 
@@ -50,6 +51,27 @@ def _write_email_atomic(target_dir: Path, name: str, raw: bytes) -> Path:
     tmp_path.write_bytes(raw)
     tmp_path.rename(eml_path)
     return eml_path
+
+
+def _read_processed_context(
+    eml_path: Path, default_catchall_to: str
+) -> tuple[str, Path | None]:
+    metadata_path = metadata_path_for(eml_path)
+    if not metadata_path.exists():
+        return default_catchall_to, None
+
+    try:
+        context = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        log.warning(
+            "Processed sender: failed to read metadata for %s; using default catchall: %s",
+            eml_path.name,
+            exc,
+        )
+        return default_catchall_to, metadata_path
+
+    catchall_to = context.get("catchall_email") or default_catchall_to
+    return catchall_to, metadata_path
 
 
 async def email_poller(cfg: EmailConfig) -> None:
@@ -116,6 +138,8 @@ async def processing_processor(cfg: EmailConfig) -> None:
     base_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username)
     processing_dir = base_dir / "processing"
     processed_dir = base_dir / "processed"
+    domain = cfg.username.split("@")[1] if "@" in cfg.username else ""
+    default_catchall_to = cfg.catchall.get(domain, "") if cfg.catchall else ""
     processing_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -127,11 +151,15 @@ async def processing_processor(cfg: EmailConfig) -> None:
     while True:
         try:
             for eml_path in sorted(processing_dir.glob("*.eml")):
-                processed_path = process_email(eml_path, processed_dir)
+                processed_path = process_email(
+                    eml_path,
+                    processed_dir,
+                    {"catchall_email": default_catchall_to},
+                )
                 if processed_path is None:
                     continue
                 log.info(
-                    "Processing processor: placeholder AI passed processing/%s → processed/%s",
+                    "Processing processor: ran subprocessor chain for processing/%s → processed/%s",
                     eml_path.name,
                     processed_path.name,
                 )
@@ -169,21 +197,25 @@ async def processed_sender(cfg: EmailConfig) -> None:
         try:
             for eml_path in sorted(processed_dir.glob("*.eml")):
                 raw = eml_path.read_bytes()
+                delivery_to, metadata_path = _read_processed_context(eml_path, catchall_to)
                 try:
                     await loop.run_in_executor(
                         None,
-                        functools.partial(_forward_email_sync, cfg, catchall_to, raw),
+                        functools.partial(_forward_email_sync, cfg, delivery_to, raw),
                     )
-                    eml_path.rename(sent_dir / eml_path.name)
+                    sent_eml_path = sent_dir / eml_path.name
+                    eml_path.rename(sent_eml_path)
+                    if metadata_path and metadata_path.exists():
+                        metadata_path.rename(metadata_path_for(sent_eml_path))
                     log.info(
                         "Processed sender: forwarded to %s → sent/%s",
-                        catchall_to,
+                        delivery_to,
                         eml_path.name,
                     )
                 except Exception as fwd_exc:
                     log.warning(
                         "Processed sender: forward to %s failed — %s will retry: %s",
-                        catchall_to,
+                        delivery_to,
                         eml_path.name,
                         fwd_exc,
                     )
@@ -213,6 +245,9 @@ async def sent_cleaner(cfg: EmailConfig) -> None:
             for eml_path in sent_dir.glob("*.eml"):
                 if eml_path.stat().st_mtime < cutoff:
                     eml_path.unlink()
+                    metadata_path = metadata_path_for(eml_path)
+                    if metadata_path.exists():
+                        metadata_path.unlink()
                     log.info(
                         "Sent cleaner: deleted %s (older than %d days)",
                         eml_path.name,
