@@ -1,3 +1,4 @@
 servers/ai/secrets/
 servers/ai/logs/
 servers/ai/emails/
+__pycache__/
