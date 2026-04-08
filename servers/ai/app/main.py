@@ -9,7 +9,13 @@ from typing import Optional
 
 import websockets
 
-from watchdog_email import email_poller, inbox_processor, sent_cleaner
+from watchdog_email import (
+    email_poller,
+    inbox_processor,
+    processed_sender,
+    processing_processor,
+    sent_cleaner,
+)
 from watchdog_http import http_pollers
 from watchdog_logging import log
 from watchdog_models import DeviceState, ensure_tls_cert, load_config
@@ -116,6 +122,8 @@ async def main() -> None:
     if email_cfg:
         tasks.append(email_poller(email_cfg))
         tasks.append(inbox_processor(email_cfg))
+        tasks.append(processing_processor(email_cfg))
+        tasks.append(processed_sender(email_cfg))
         tasks.append(sent_cleaner(email_cfg))
         log.info(
             "Email enabled — %s (POP3 port %d, SMTP port %d)",

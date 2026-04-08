@@ -23,14 +23,16 @@ mqtt:
 #   poll_interval: 60               # seconds between POP3 polls (default)
 #   store_dir: "/var/lib/emails"    # host path mounted via create.sh volume (default)
 #   sent_retention_days: 30         # delete sent/ files older than this many days (0 = keep forever)
-#   catchall:                       # per-domain forward address; omit to disable forwarding
+#   catchall:                       # per-domain forward address; omit to disable final sending
 #     example.com: "catchall@example.com"
 #     otherdomain.net: "catchall@otherdomain.net"
 #
 # Folder layout per account:
-#   {store_dir}/{normalized_address}/inbox/   — received, pending forward
-#   {store_dir}/{normalized_address}/sent/    — forwarded successfully; auto-deleted after sent_retention_days
-# Files are written atomically (.tmp → rename) before forwarding.
+#   {store_dir}/{normalized_address}/inbox/       — freshly received from POP3
+#   {store_dir}/{normalized_address}/processing/  — queued for AI spam filtering
+#   {store_dir}/{normalized_address}/processed/   — AI-approved output waiting to be sent
+#   {store_dir}/{normalized_address}/sent/        — forwarded successfully; auto-deleted after sent_retention_days
+# Files are written atomically (.tmp → rename) for stage hand-offs.
 # Messages are deleted from the POP3 server at fetch time.
 
 log_level: info

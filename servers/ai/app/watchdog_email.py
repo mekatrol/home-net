@@ -8,10 +8,13 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
+from processors import process_email
 from watchdog_logging import log
 from watchdog_models import EmailConfig, normalize_email_path
 
 INBOX_SCAN_INTERVAL = 10
+PROCESSING_SCAN_INTERVAL = 10
+PROCESSED_SCAN_INTERVAL = 10
 SENT_CLEAN_INTERVAL = 3600
 
 
@@ -41,6 +44,14 @@ def _forward_email_sync(cfg: EmailConfig, to: str, raw: bytes) -> None:
         smtp.sendmail(cfg.username, to, raw)
 
 
+def _write_email_atomic(target_dir: Path, name: str, raw: bytes) -> Path:
+    tmp_path = target_dir / f"{name}.tmp"
+    eml_path = target_dir / name
+    tmp_path.write_bytes(raw)
+    tmp_path.rename(eml_path)
+    return eml_path
+
+
 async def email_poller(cfg: EmailConfig) -> None:
     loop = asyncio.get_running_loop()
     inbox_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username) / "inbox"
@@ -62,10 +73,7 @@ async def email_poller(cfg: EmailConfig) -> None:
                 subject = msg.get("Subject", "(no subject)")
                 sender = msg.get("From", "(unknown)")
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                tmp_path = inbox_dir / f"{timestamp}.eml.tmp"
-                eml_path = inbox_dir / f"{timestamp}.eml"
-                tmp_path.write_bytes(raw)
-                tmp_path.rename(eml_path)
+                eml_path = _write_email_atomic(inbox_dir, f"{timestamp}.eml", raw)
                 log.info(
                     "Email received from %s: %s → inbox/%s",
                     sender,
@@ -78,11 +86,66 @@ async def email_poller(cfg: EmailConfig) -> None:
 
 
 async def inbox_processor(cfg: EmailConfig) -> None:
-    loop = asyncio.get_running_loop()
     base_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username)
     inbox_dir = base_dir / "inbox"
-    sent_dir = base_dir / "sent"
+    processing_dir = base_dir / "processing"
     inbox_dir.mkdir(parents=True, exist_ok=True)
+    processing_dir.mkdir(parents=True, exist_ok=True)
+
+    log.info(
+        "Inbox processor started — moving inbox/ → processing/ every %ds",
+        INBOX_SCAN_INTERVAL,
+    )
+
+    while True:
+        try:
+            for eml_path in sorted(inbox_dir.glob("*.eml")):
+                target_path = processing_dir / eml_path.name
+                eml_path.rename(target_path)
+                log.info(
+                    "Inbox processor: moved inbox/%s → processing/%s",
+                    eml_path.name,
+                    target_path.name,
+                )
+        except Exception as exc:
+            log.warning("Inbox processor error: %s", exc)
+        await asyncio.sleep(INBOX_SCAN_INTERVAL)
+
+
+async def processing_processor(cfg: EmailConfig) -> None:
+    base_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username)
+    processing_dir = base_dir / "processing"
+    processed_dir = base_dir / "processed"
+    processing_dir.mkdir(parents=True, exist_ok=True)
+    processed_dir.mkdir(parents=True, exist_ok=True)
+
+    log.info(
+        "Processing processor started — placeholder AI moving processing/ → processed/ every %ds",
+        PROCESSING_SCAN_INTERVAL,
+    )
+
+    while True:
+        try:
+            for eml_path in sorted(processing_dir.glob("*.eml")):
+                processed_path = process_email(eml_path, processed_dir)
+                if processed_path is None:
+                    continue
+                log.info(
+                    "Processing processor: placeholder AI passed processing/%s → processed/%s",
+                    eml_path.name,
+                    processed_path.name,
+                )
+        except Exception as exc:
+            log.warning("Processing processor error: %s", exc)
+        await asyncio.sleep(PROCESSING_SCAN_INTERVAL)
+
+
+async def processed_sender(cfg: EmailConfig) -> None:
+    loop = asyncio.get_running_loop()
+    base_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username)
+    processed_dir = base_dir / "processed"
+    sent_dir = base_dir / "sent"
+    processed_dir.mkdir(parents=True, exist_ok=True)
     sent_dir.mkdir(parents=True, exist_ok=True)
 
     domain = cfg.username.split("@")[1] if "@" in cfg.username else ""
@@ -90,21 +153,21 @@ async def inbox_processor(cfg: EmailConfig) -> None:
 
     if catchall_to:
         log.info(
-            "Inbox processor started — forwarding %s → %s, scanning every %ds",
+            "Processed sender started — forwarding %s → %s from processed/ every %ds",
             domain,
             catchall_to,
-            INBOX_SCAN_INTERVAL,
+            PROCESSED_SCAN_INTERVAL,
         )
     else:
         log.info(
-            "Inbox processor: no catchall for '%s' — inbox scanning disabled",
+            "Processed sender: no catchall for '%s' — processed/ scanning disabled",
             domain,
         )
         return
 
     while True:
         try:
-            for eml_path in sorted(inbox_dir.glob("*.eml")):
+            for eml_path in sorted(processed_dir.glob("*.eml")):
                 raw = eml_path.read_bytes()
                 try:
                     await loop.run_in_executor(
@@ -113,20 +176,20 @@ async def inbox_processor(cfg: EmailConfig) -> None:
                     )
                     eml_path.rename(sent_dir / eml_path.name)
                     log.info(
-                        "Inbox processor: forwarded to %s → sent/%s",
+                        "Processed sender: forwarded to %s → sent/%s",
                         catchall_to,
                         eml_path.name,
                     )
                 except Exception as fwd_exc:
                     log.warning(
-                        "Inbox processor: forward to %s failed — %s will retry: %s",
+                        "Processed sender: forward to %s failed — %s will retry: %s",
                         catchall_to,
                         eml_path.name,
                         fwd_exc,
                     )
         except Exception as exc:
-            log.warning("Inbox processor error: %s", exc)
-        await asyncio.sleep(INBOX_SCAN_INTERVAL)
+            log.warning("Processed sender error: %s", exc)
+        await asyncio.sleep(PROCESSED_SCAN_INTERVAL)
 
 
 async def sent_cleaner(cfg: EmailConfig) -> None:
