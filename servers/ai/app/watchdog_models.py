@@ -55,7 +55,7 @@ class EmailConfig:
     store_dir: str = "/var/lib/emails"
     sent_retention_days: int = 10
     catchall: dict = field(default_factory=dict)
-    redirects: dict[str, list[str]] = field(default_factory=dict)
+    redirects: dict[str, list[dict[str, str]]] = field(default_factory=dict)
 
 
 def normalize_email_path(address: str) -> str:
@@ -146,16 +146,52 @@ def _parse_log_level(value: Any) -> int:
     return logging.INFO
 
 
-def _normalize_redirects_config(raw: Any) -> dict[str, list[str]]:
+def _normalize_redirects_config(raw: Any) -> dict[str, list[dict[str, str]]]:
     redirects = raw.get("redirects", raw) if isinstance(raw, dict) else {}
-    normalized: dict[str, list[str]] = {}
-    for catchall_email, addresses in redirects.items():
+    normalized: dict[str, list[dict[str, str]]] = {}
+    for catchall_email, rules in redirects.items():
         if not isinstance(catchall_email, str):
             continue
-        address_list = addresses if isinstance(addresses, list) else []
-        normalized[catchall_email.strip().lower()] = [
-            addr.strip().lower() for addr in address_list if isinstance(addr, str)
-        ]
+        catchall_email = catchall_email.strip().lower()
+        if "@" not in catchall_email:
+            continue
+
+        _, domain = catchall_email.rsplit("@", 1)
+        normalized_rules: list[dict[str, str]] = []
+        raw_rules = rules if isinstance(rules, list) else []
+        for rule in raw_rules:
+            if isinstance(rule, str):
+                value = rule.strip()
+                if not value:
+                    continue
+                if value.lower().startswith("regex:"):
+                    pattern = value[6:].strip()
+                    if pattern:
+                        normalized_rules.append({"type": "regex", "value": pattern})
+                    continue
+                address = value.lower()
+                if "@" not in address:
+                    address = f"{address}@{domain}"
+                normalized_rules.append({"type": "exact", "value": address})
+                continue
+
+            if not isinstance(rule, dict):
+                continue
+
+            exact_value = rule.get("exact") or rule.get("address")
+            if isinstance(exact_value, str) and exact_value.strip():
+                address = exact_value.strip().lower()
+                if "@" not in address:
+                    address = f"{address}@{domain}"
+                normalized_rules.append({"type": "exact", "value": address})
+
+            regex_value = rule.get("regex")
+            if isinstance(regex_value, str) and regex_value.strip():
+                normalized_rules.append(
+                    {"type": "regex", "value": regex_value.strip()}
+                )
+
+        normalized[catchall_email] = normalized_rules
     return normalized
 
 

@@ -1,9 +1,15 @@
-# Maps catchall destination addresses to the recipient addresses that should be
+# Maps catchall destination addresses to recipient match rules that should be
 # redirected there during processing.
 #
 # redirects:
 #   finance@domain.com:
-#     - invoices@domain.com
-#     - accounts@domain.com
+#     - invoices
+#     - accounts
+#     - regex: "^invoice-.*$"
 #   support@domain.com:
-#     - help@domain.com
+#     - help
+#     - regex: "helpdesk-[0-9]+"
+#
+# Child entries are matched against the same domain as the parent catchall
+# address, so they usually only need the local part. Full email addresses still
+# work for exact matches.

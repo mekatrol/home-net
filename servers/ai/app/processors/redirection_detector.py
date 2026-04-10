@@ -1,4 +1,5 @@
 import email as email_lib
+import re
 from email.utils import getaddresses
 from pathlib import Path
 
@@ -18,27 +19,64 @@ def process_email(source_path: Path, context: dict) -> bool:
         if address.strip()
     }
 
-    for redirect_to, redirect_from_list in redirects.items():
-        if not isinstance(redirect_to, str) or not isinstance(redirect_from_list, list):
+    for redirect_to, redirect_rules in redirects.items():
+        if not isinstance(redirect_to, str) or not isinstance(redirect_rules, list):
             continue
-        redirect_from = {
-            address.strip().lower()
-            for address in redirect_from_list
-            if isinstance(address, str) and address.strip()
+        redirect_domain = redirect_to.rsplit("@", 1)[1].lower() if "@" in redirect_to else ""
+        exact_matches = {
+            rule["value"].strip().lower()
+            for rule in redirect_rules
+            if isinstance(rule, dict)
+            and rule.get("type") == "exact"
+            and isinstance(rule.get("value"), str)
+            and rule["value"].strip()
         }
+        regex_patterns = [
+            rule["value"]
+            for rule in redirect_rules
+            if isinstance(rule, dict)
+            and rule.get("type") == "regex"
+            and isinstance(rule.get("value"), str)
+            and rule["value"].strip()
+        ]
         email_log.debug(
-            "Redirection detector: checking %s recipients=%s against redirect_to=%s redirect_from=%s",
+            "Redirection detector: checking %s recipients=%s against redirect_to=%s exact=%s regex=%s",
             source_path.name,
             sorted(recipients),
             redirect_to,
-            sorted(redirect_from),
+            sorted(exact_matches),
+            regex_patterns,
         )
-        if recipients & redirect_from:
+
+        matched_recipients = sorted(recipients & exact_matches)
+        if not matched_recipients:
+            for recipient in recipients:
+                if "@" not in recipient or not redirect_domain:
+                    continue
+                local_part, domain = recipient.rsplit("@", 1)
+                if domain.lower() != redirect_domain:
+                    continue
+                for pattern in regex_patterns:
+                    try:
+                        if re.fullmatch(pattern, local_part):
+                            matched_recipients.append(recipient)
+                            break
+                    except re.error as exc:
+                        email_log.warning(
+                            "Redirection detector: invalid regex for %s (%s): %s",
+                            redirect_to,
+                            pattern,
+                            exc,
+                        )
+                if matched_recipients:
+                    break
+
+        if matched_recipients:
             context["catchall_email"] = redirect_to
             email_log.info(
                 "Redirection detector: %s matched %s -> %s",
                 source_path.name,
-                sorted(recipients & redirect_from),
+                matched_recipients,
                 redirect_to,
             )
             break

@@ -15,7 +15,8 @@ mqtt:
 
 # Email — optional; enables POP3 polling and SMTP sending
 # Redirect overrides live in a sibling file named /run/secrets/redirects_config.yaml.
-# That file maps catchall destination addresses to recipient addresses that should be sent there.
+# That file maps catchall destination addresses to exact local-parts or regex rules
+# that should be sent there within the same destination domain.
 # email:
 #   host: "mail.example.com"
 #   username: "user@example.com"
