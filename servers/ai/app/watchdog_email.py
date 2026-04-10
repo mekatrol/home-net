@@ -11,7 +11,7 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 from processors import metadata_path_for, process_email
-from watchdog_logging import log
+from watchdog_logging import email_log
 from watchdog_models import EmailConfig, normalize_email_path
 
 INBOX_SCAN_INTERVAL = 10
@@ -64,7 +64,7 @@ def _read_processed_context(
     try:
         context = json.loads(metadata_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        log.warning(
+        email_log.warning(
             "Processed sender: failed to read metadata for %s; using default catchall: %s",
             eml_path.name,
             exc,
@@ -88,7 +88,7 @@ async def email_poller(cfg: EmailConfig) -> None:
     loop = asyncio.get_running_loop()
     inbox_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username) / "inbox"
     inbox_dir.mkdir(parents=True, exist_ok=True)
-    log.info(
+    email_log.info(
         "Email poller started — polling %s:%d every %ds, inbox: %s",
         cfg.host,
         cfg.pop3_port,
@@ -106,14 +106,14 @@ async def email_poller(cfg: EmailConfig) -> None:
                 sender = msg.get("From", "(unknown)")
                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 eml_path = _write_email_atomic(inbox_dir, f"{timestamp}.eml", raw)
-                log.info(
+                email_log.info(
                     "Email received from %s: %s → inbox/%s",
                     sender,
                     subject,
                     eml_path.name,
                 )
         except Exception as exc:
-            log.warning("Email poll error: %s", exc)
+            email_log.warning("Email poll error: %s", exc)
         await asyncio.sleep(cfg.poll_interval)
 
 
@@ -124,7 +124,7 @@ async def inbox_processor(cfg: EmailConfig) -> None:
     inbox_dir.mkdir(parents=True, exist_ok=True)
     processing_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info(
+    email_log.info(
         "Inbox processor started — moving inbox/ → processing/ every %ds",
         INBOX_SCAN_INTERVAL,
     )
@@ -134,13 +134,13 @@ async def inbox_processor(cfg: EmailConfig) -> None:
             for eml_path in sorted(inbox_dir.glob("*.eml")):
                 target_path = processing_dir / eml_path.name
                 eml_path.rename(target_path)
-                log.info(
+                email_log.info(
                     "Inbox processor: moved inbox/%s → processing/%s",
                     eml_path.name,
                     target_path.name,
                 )
         except Exception as exc:
-            log.warning("Inbox processor error: %s", exc)
+            email_log.warning("Inbox processor error: %s", exc)
         await asyncio.sleep(INBOX_SCAN_INTERVAL)
 
 
@@ -153,7 +153,7 @@ async def processing_processor(cfg: EmailConfig) -> None:
     processing_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info(
+    email_log.info(
         "Processing processor started — placeholder AI moving processing/ → processed/ every %ds",
         PROCESSING_SCAN_INTERVAL,
     )
@@ -171,13 +171,13 @@ async def processing_processor(cfg: EmailConfig) -> None:
                 )
                 if processed_path is None:
                     continue
-                log.info(
+                email_log.info(
                     "Processing processor: ran subprocessor chain for processing/%s → processed/%s",
                     eml_path.name,
                     processed_path.name,
                 )
         except Exception as exc:
-            log.warning("Processing processor error: %s", exc)
+            email_log.warning("Processing processor error: %s", exc)
         await asyncio.sleep(PROCESSING_SCAN_INTERVAL)
 
 
@@ -193,14 +193,14 @@ async def processed_sender(cfg: EmailConfig) -> None:
     catchall_to = cfg.catchall.get(domain) if cfg.catchall else None
 
     if catchall_to:
-        log.info(
+        email_log.info(
             "Processed sender started — forwarding %s → %s from processed/ every %ds",
             domain,
             catchall_to,
             PROCESSED_SCAN_INTERVAL,
         )
     else:
-        log.info(
+        email_log.info(
             "Processed sender: no catchall for '%s' — processed/ scanning disabled",
             domain,
         )
@@ -221,32 +221,32 @@ async def processed_sender(cfg: EmailConfig) -> None:
                     eml_path.rename(sent_eml_path)
                     if metadata_path and metadata_path.exists():
                         metadata_path.rename(metadata_path_for(sent_eml_path))
-                    log.info(
+                    email_log.info(
                         "Processed sender: forwarded recipients=%s to %s → sent/%s",
                         original_recipients or ["(unknown)"],
                         delivery_to,
                         eml_path.name,
                     )
                 except Exception as fwd_exc:
-                    log.warning(
+                    email_log.warning(
                         "Processed sender: forward to %s failed — %s will retry: %s",
                         delivery_to,
                         eml_path.name,
                         fwd_exc,
                     )
         except Exception as exc:
-            log.warning("Processed sender error: %s", exc)
+            email_log.warning("Processed sender error: %s", exc)
         await asyncio.sleep(PROCESSED_SCAN_INTERVAL)
 
 
 async def sent_cleaner(cfg: EmailConfig) -> None:
     if cfg.sent_retention_days <= 0:
-        log.info("Sent cleaner: retention disabled (sent_retention_days=0)")
+        email_log.info("Sent cleaner: retention disabled (sent_retention_days=0)")
         return
 
     sent_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username) / "sent"
     sent_dir.mkdir(parents=True, exist_ok=True)
-    log.info(
+    email_log.info(
         "Sent cleaner started — deleting sent/ files older than %d days, checking every %ds",
         cfg.sent_retention_days,
         SENT_CLEAN_INTERVAL,
@@ -263,13 +263,13 @@ async def sent_cleaner(cfg: EmailConfig) -> None:
                     metadata_path = metadata_path_for(eml_path)
                     if metadata_path.exists():
                         metadata_path.unlink()
-                    log.info(
+                    email_log.info(
                         "Sent cleaner: deleted %s (older than %d days)",
                         eml_path.name,
                         cfg.sent_retention_days,
                     )
         except Exception as exc:
-            log.warning("Sent cleaner error: %s", exc)
+            email_log.warning("Sent cleaner error: %s", exc)
         await asyncio.sleep(SENT_CLEAN_INTERVAL)
 
 
@@ -292,8 +292,8 @@ async def send_email(cfg: EmailConfig, to: str, subject: str, body: str) -> bool
             None,
             functools.partial(_send_email_sync, cfg, to, subject, body),
         )
-        log.info("Email sent to %s: %s", to, subject)
+        email_log.info("Email sent to %s: %s", to, subject)
         return True
     except Exception as exc:
-        log.warning("Failed to send email to %s: %s", to, exc)
+        email_log.warning("Failed to send email to %s: %s", to, exc)
         return False

@@ -37,7 +37,12 @@ mqtt:
 # Files are written atomically (.tmp → rename) for stage hand-offs.
 # Messages are deleted from the POP3 server at fetch time.
 
-log_level: info         # set to debug to see redirection detector match attempts
+log_level: info         # default for all logs; overridden per logger below if needed
+log_levels:
+  watchdog: info
+  email: info
+  device: info
+
 status_interval: 10   # seconds between MQTT status publishes for all devices
 
 devices:

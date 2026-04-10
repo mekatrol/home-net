@@ -17,7 +17,7 @@ from watchdog_email import (
     sent_cleaner,
 )
 from watchdog_http import http_pollers
-from watchdog_logging import log
+from watchdog_logging import email_log, log, set_log_levels
 from watchdog_models import DeviceState, ensure_tls_cert, load_config
 from watchdog_mqtt import MqttBridge, mqtt_listener, status_publisher
 from watchdog_schedulers import (
@@ -74,11 +74,16 @@ async def main() -> None:
         config_path = Path(__file__).parent / "config.yaml"
 
     log.info("Loading config from %s", config_path)
-    server_cfg, mqtt_cfg, devices, log_level, status_interval, email_cfg = load_config(
+    server_cfg, mqtt_cfg, devices, log_levels, status_interval, email_cfg = load_config(
         config_path
     )
-    log.setLevel(log_level)
-    log.info("Log level set to %s", logging.getLevelName(log_level))
+    set_log_levels(
+        watchdog_level=log_levels["watchdog"],
+        email_level=log_levels["email"],
+        device_level=log_levels["device"],
+    )
+    log.info("Watchdog log level set to %s", logging.getLevelName(log_levels["watchdog"]))
+    email_log.info("Email log level set to %s", logging.getLevelName(log_levels["email"]))
 
     states: dict[str, DeviceState] = {d.name: DeviceState(config=d) for d in devices}
     _log_device_startup(devices)
@@ -125,14 +130,14 @@ async def main() -> None:
         tasks.append(processing_processor(email_cfg))
         tasks.append(processed_sender(email_cfg))
         tasks.append(sent_cleaner(email_cfg))
-        log.info(
+        email_log.info(
             "Email enabled — %s (POP3 port %d, SMTP port %d)",
             email_cfg.host,
             email_cfg.pop3_port,
             email_cfg.smtp_port,
         )
     else:
-        log.info("No email config — email polling disabled")
+        email_log.info("No email config — email polling disabled")
 
     ssl_ctx = ensure_tls_cert()
     ws_server = WatchdogServer(states, token, bridge)

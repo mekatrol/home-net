@@ -92,13 +92,38 @@ class DeviceState:
 
 def load_config(
     path: Path,
-) -> tuple[dict, Optional[dict], list[DeviceConfig], int, int, Optional[EmailConfig]]:
+) -> tuple[
+    dict,
+    Optional[dict],
+    list[DeviceConfig],
+    dict[str, int],
+    int,
+    Optional[EmailConfig],
+]:
     with open(path) as f:
         raw = yaml.safe_load(f)
     server_cfg = raw["server"]
     mqtt_cfg = raw.get("mqtt")
     devices = [DeviceConfig(**d) for d in raw["devices"]]
-    log_level = logging.getLevelName(raw.get("log_level", "INFO").upper())
+    default_log_level = _parse_log_level(raw.get("log_level", "INFO"))
+    raw_log_levels = raw.get("log_levels", {}) if isinstance(raw, dict) else {}
+    log_levels = {
+        "watchdog": _parse_log_level(
+            raw_log_levels.get("watchdog", default_log_level)
+            if isinstance(raw_log_levels, dict)
+            else default_log_level
+        ),
+        "email": _parse_log_level(
+            raw_log_levels.get("email", default_log_level)
+            if isinstance(raw_log_levels, dict)
+            else default_log_level
+        ),
+        "device": _parse_log_level(
+            raw_log_levels.get("device", default_log_level)
+            if isinstance(raw_log_levels, dict)
+            else default_log_level
+        ),
+    }
     status_interval = int(raw.get("status_interval", 10))
     email_cfg: Optional[EmailConfig] = None
     if "email" in raw:
@@ -108,7 +133,17 @@ def load_config(
             with open(redirects_path) as f:
                 redirects_raw = yaml.safe_load(f) or {}
             email_cfg.redirects = _normalize_redirects_config(redirects_raw)
-    return server_cfg, mqtt_cfg, devices, log_level, status_interval, email_cfg
+    return server_cfg, mqtt_cfg, devices, log_levels, status_interval, email_cfg
+
+
+def _parse_log_level(value: Any) -> int:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        parsed = logging.getLevelName(value.upper())
+        if isinstance(parsed, int):
+            return parsed
+    return logging.INFO
 
 
 def _normalize_redirects_config(raw: Any) -> dict[str, list[str]]:

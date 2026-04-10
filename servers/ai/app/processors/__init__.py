@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from watchdog_logging import log
+from watchdog_logging import email_log
 
 from .redirection_detector import process_email as run_redirection_detector
 from .spam_detector import process_email as run_spam_detector
@@ -36,7 +36,7 @@ def process_email(
         try:
             should_continue = processor(locked_path, context)
         except Exception as exc:
-            log.warning(
+            email_log.warning(
                 "Processor '%s' failed for %s; continuing: %s",
                 processor_name,
                 locked_path.name,

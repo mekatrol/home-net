@@ -2,7 +2,7 @@ import email as email_lib
 from email.utils import getaddresses
 from pathlib import Path
 
-from watchdog_logging import log
+from watchdog_logging import email_log
 
 
 def process_email(source_path: Path, context: dict) -> bool:
@@ -26,7 +26,7 @@ def process_email(source_path: Path, context: dict) -> bool:
             for address in redirect_from_list
             if isinstance(address, str) and address.strip()
         }
-        log.debug(
+        email_log.debug(
             "Redirection detector: checking %s recipients=%s against redirect_to=%s redirect_from=%s",
             source_path.name,
             sorted(recipients),
@@ -35,7 +35,7 @@ def process_email(source_path: Path, context: dict) -> bool:
         )
         if recipients & redirect_from:
             context["catchall_email"] = redirect_to
-            log.info(
+            email_log.info(
                 "Redirection detector: %s matched %s -> %s",
                 source_path.name,
                 sorted(recipients & redirect_from),
