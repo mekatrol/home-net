@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from watchdog_logging import log
 
 from .redirection_detector import process_email as run_redirection_detector
 from .spam_detector import process_email as run_spam_detector
 
-ProcessorContext = dict[str, str]
+ProcessorContext = dict[str, Any]
 Subprocessor = Callable[[Path, ProcessorContext], bool]
 
 SUBPROCESSORS: tuple[tuple[str, Subprocessor], ...] = (

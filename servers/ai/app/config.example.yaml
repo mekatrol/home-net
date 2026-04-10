@@ -14,6 +14,8 @@ mqtt:
   password: "secret"
 
 # Email — optional; enables POP3 polling and SMTP sending
+# Redirect overrides live in a sibling file named /run/secrets/redirects_config.yaml.
+# That file maps catchall destination addresses to recipient addresses that should be sent there.
 # email:
 #   host: "mail.example.com"
 #   username: "user@example.com"
@@ -35,7 +37,7 @@ mqtt:
 # Files are written atomically (.tmp → rename) for stage hand-offs.
 # Messages are deleted from the POP3 server at fetch time.
 
-log_level: info
+log_level: info         # set to debug to see redirection detector match attempts
 status_interval: 10   # seconds between MQTT status publishes for all devices
 
 devices:

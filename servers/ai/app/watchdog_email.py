@@ -5,6 +5,7 @@ import functools
 import json
 import poplib
 import smtplib
+from email.utils import getaddresses
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -72,6 +73,15 @@ def _read_processed_context(
 
     catchall_to = context.get("catchall_email") or default_catchall_to
     return catchall_to, metadata_path
+
+
+def _extract_message_recipients(raw: bytes) -> list[str]:
+    msg = email_lib.message_from_bytes(raw)
+    return [
+        address.strip().lower()
+        for _, address in getaddresses(msg.get_all("To", []))
+        if address.strip()
+    ]
 
 
 async def email_poller(cfg: EmailConfig) -> None:
@@ -154,7 +164,10 @@ async def processing_processor(cfg: EmailConfig) -> None:
                 processed_path = process_email(
                     eml_path,
                     processed_dir,
-                    {"catchall_email": default_catchall_to},
+                    {
+                        "catchall_email": default_catchall_to,
+                        "redirects": cfg.redirects,
+                    },
                 )
                 if processed_path is None:
                     continue
@@ -197,6 +210,7 @@ async def processed_sender(cfg: EmailConfig) -> None:
         try:
             for eml_path in sorted(processed_dir.glob("*.eml")):
                 raw = eml_path.read_bytes()
+                original_recipients = _extract_message_recipients(raw)
                 delivery_to, metadata_path = _read_processed_context(eml_path, catchall_to)
                 try:
                     await loop.run_in_executor(
@@ -208,7 +222,8 @@ async def processed_sender(cfg: EmailConfig) -> None:
                     if metadata_path and metadata_path.exists():
                         metadata_path.rename(metadata_path_for(sent_eml_path))
                     log.info(
-                        "Processed sender: forwarded to %s → sent/%s",
+                        "Processed sender: forwarded recipients=%s to %s → sent/%s",
+                        original_recipients or ["(unknown)"],
                         delivery_to,
                         eml_path.name,
                     )

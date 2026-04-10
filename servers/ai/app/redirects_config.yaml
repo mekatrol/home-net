@@ -1,0 +1,9 @@
+# Maps catchall destination addresses to the recipient addresses that should be
+# redirected there during processing.
+#
+# redirects:
+#   finance@domain.com:
+#     - invoices@domain.com
+#     - accounts@domain.com
+#   support@domain.com:
+#     - help@domain.com

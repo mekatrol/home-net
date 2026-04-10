@@ -55,6 +55,7 @@ class EmailConfig:
     store_dir: str = "/var/lib/emails"
     sent_retention_days: int = 10
     catchall: dict = field(default_factory=dict)
+    redirects: dict[str, list[str]] = field(default_factory=dict)
 
 
 def normalize_email_path(address: str) -> str:
@@ -102,7 +103,25 @@ def load_config(
     email_cfg: Optional[EmailConfig] = None
     if "email" in raw:
         email_cfg = EmailConfig(**raw["email"])
+        redirects_path = path.with_name("redirects_config.yaml")
+        if redirects_path.exists():
+            with open(redirects_path) as f:
+                redirects_raw = yaml.safe_load(f) or {}
+            email_cfg.redirects = _normalize_redirects_config(redirects_raw)
     return server_cfg, mqtt_cfg, devices, log_level, status_interval, email_cfg
+
+
+def _normalize_redirects_config(raw: Any) -> dict[str, list[str]]:
+    redirects = raw.get("redirects", raw) if isinstance(raw, dict) else {}
+    normalized: dict[str, list[str]] = {}
+    for catchall_email, addresses in redirects.items():
+        if not isinstance(catchall_email, str):
+            continue
+        address_list = addresses if isinstance(addresses, list) else []
+        normalized[catchall_email.strip().lower()] = [
+            addr.strip().lower() for addr in address_list if isinstance(addr, str)
+        ]
+    return normalized
 
 
 def ensure_tls_cert() -> ssl.SSLContext:
