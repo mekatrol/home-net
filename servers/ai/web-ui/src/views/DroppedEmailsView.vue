@@ -6,10 +6,19 @@ import { useRedirectStore } from '@/stores/redirects'
 
 const redirectStore = useRedirectStore()
 
-const { deletingDroppedEmails, droppedEmails, error, hasLoaded, success, token } =
+const {
+  continuingDroppedEmails,
+  deletingDroppedEmails,
+  droppedEmails,
+  error,
+  hasLoaded,
+  success,
+  token,
+} =
   storeToRefs(redirectStore)
 
-const { deleteDroppedEmailSelection, loadDroppedEmails } = redirectStore
+const { continueDroppedEmailSelection, deleteDroppedEmailSelection, loadDroppedEmails } =
+  redirectStore
 
 const selectedDroppedFilenames = ref<string[]>([])
 let droppedEmailRefreshTimer: number | null = null
@@ -57,6 +66,14 @@ async function deleteSelectedDroppedEmails(): Promise<void> {
   )
 }
 
+async function continueSelectedDroppedEmails(): Promise<void> {
+  const filenames = [...selectedDroppedFilenames.value]
+  await continueDroppedEmailSelection(filenames)
+  selectedDroppedFilenames.value = selectedDroppedFilenames.value.filter(
+    (filename) => !filenames.includes(filename),
+  )
+}
+
 function formatReceivedAt(value: string): string {
   if (!value) {
     return 'Unknown'
@@ -83,7 +100,12 @@ function stopDroppedEmailRefresh(): void {
 function startDroppedEmailRefresh(): void {
   stopDroppedEmailRefresh()
   droppedEmailRefreshTimer = window.setInterval(() => {
-    if (!hasLoaded.value || !token.value || deletingDroppedEmails.value) {
+    if (
+      !hasLoaded.value ||
+      !token.value ||
+      deletingDroppedEmails.value ||
+      continuingDroppedEmails.value
+    ) {
       return
     }
     void loadDroppedEmails()
@@ -105,15 +127,24 @@ onBeforeUnmount(() => {
     <div class="section-header">
       <div>
         <h2>Dropped emails</h2>
-        <p>Newest first. Select rows to remove the email and its matching metadata file.</p>
+        <p>Newest first. Select rows to continue through processing or remove them permanently.</p>
       </div>
-      <button
-        class="danger"
-        @click="deleteSelectedDroppedEmails"
-        :disabled="deletingDroppedEmails || !hasDroppedSelection"
-      >
-        Delete selected
-      </button>
+      <div class="auth-actions">
+        <button
+          class="secondary"
+          @click="continueSelectedDroppedEmails"
+          :disabled="continuingDroppedEmails || deletingDroppedEmails || !hasDroppedSelection"
+        >
+          Continue processing
+        </button>
+        <button
+          class="danger"
+          @click="deleteSelectedDroppedEmails"
+          :disabled="continuingDroppedEmails || deletingDroppedEmails || !hasDroppedSelection"
+        >
+          Delete selected
+        </button>
+      </div>
     </div>
 
     <p v-if="error" class="message error section-message">{{ error }}</p>

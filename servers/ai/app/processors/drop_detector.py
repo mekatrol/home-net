@@ -103,6 +103,13 @@ def _match_drop_rule(recipients: set[str], raw_rule: str) -> list[str]:
 
 
 def process_email(source_path: Path, context: dict) -> bool:
+    if context.get("skip_drop_detector"):
+        email_log.info(
+            "Drop detector: skipping %s because skip_drop_detector=true",
+            source_path.name,
+        )
+        return True
+
     recipients = _extract_recipients(source_path)
     email_log.debug(
         "Drop detector: evaluating %s recipients=%s",

@@ -21,6 +21,7 @@ PROCESSED_SCAN_INTERVAL = 10
 SENT_CLEAN_INTERVAL = 3600
 DROPPED_CLEAN_INTERVAL = 3600
 RECIPIENT_HEADERS = ("To", "Cc", "Bcc")
+RESUME_FROM_DROPPED_KEY = "resume_from_dropped"
 
 
 def _fetch_emails_sync(
@@ -132,6 +133,81 @@ def delete_email_with_metadata(eml_path: Path) -> bool:
     metadata_path = metadata_path_for(eml_path)
     if metadata_path.exists():
         metadata_path.unlink()
+    return True
+
+
+def _read_email_metadata(eml_path: Path) -> dict[str, object]:
+    metadata_path = metadata_path_for(eml_path)
+    if not metadata_path.exists():
+        return {}
+
+    try:
+        raw_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        email_log.warning(
+            "Email metadata: failed to read metadata for %s: %s",
+            eml_path.name,
+            exc,
+        )
+        return {}
+
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+
+    email_log.warning(
+        "Email metadata: ignoring non-dict metadata for %s: %r",
+        eml_path.name,
+        type(raw_metadata).__name__,
+    )
+    return {}
+
+
+def move_dropped_email_to_processing(cfg: EmailConfig, filename: str) -> bool:
+    base_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username)
+    dropped_dir = base_dir / "dropped"
+    processing_dir = base_dir / "processing"
+    dropped_dir.mkdir(parents=True, exist_ok=True)
+    processing_dir.mkdir(parents=True, exist_ok=True)
+
+    source_path = dropped_dir / filename
+    if source_path.suffix != ".eml" or source_path.parent != dropped_dir or not source_path.exists():
+        return False
+
+    destination_path = processing_dir / source_path.name
+    if destination_path.exists():
+        email_log.warning(
+            "Dropped resume: processing/%s already exists; refusing to resume",
+            source_path.name,
+        )
+        return False
+
+    source_metadata_path = metadata_path_for(source_path)
+    destination_metadata_path = metadata_path_for(destination_path)
+    metadata = _read_email_metadata(source_path)
+    metadata[RESUME_FROM_DROPPED_KEY] = True
+
+    source_path.rename(destination_path)
+    try:
+        destination_metadata_path.write_text(
+            json.dumps(metadata),
+            encoding="utf-8",
+        )
+        if source_metadata_path.exists():
+            source_metadata_path.unlink()
+    except Exception:
+        try:
+            destination_path.rename(source_path)
+        except FileNotFoundError:
+            pass
+        if destination_metadata_path.exists():
+            destination_metadata_path.unlink()
+        raise
+
+    email_log.info(
+        "Dropped resume: moved dropped/%s -> processing/%s",
+        source_path.name,
+        destination_path.name,
+    )
     return True
 
 
@@ -280,6 +356,7 @@ async def processing_processor(cfg: EmailConfig) -> None:
                 redirects = load_redirects_config(Path(cfg.config_path))
                 cfg.redirects = redirects
             for eml_path in sorted(processing_dir.glob("*.eml")):
+                metadata = _read_email_metadata(eml_path)
                 processed_path = process_email(
                     eml_path,
                     processed_dir,
@@ -289,6 +366,7 @@ async def processing_processor(cfg: EmailConfig) -> None:
                         "drop_rules": cfg.drop,
                         "allowed_domains": cfg.allowed_domains,
                         "dropped_dir": dropped_dir,
+                        "skip_drop_detector": bool(metadata.get(RESUME_FROM_DROPPED_KEY)),
                     },
                 )
                 if processed_path is None:

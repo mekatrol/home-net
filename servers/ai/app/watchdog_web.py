@@ -7,7 +7,11 @@ from typing import Any
 
 from aiohttp import web
 
-from watchdog_email import delete_email_with_metadata, list_dropped_emails
+from watchdog_email import (
+    delete_email_with_metadata,
+    list_dropped_emails,
+    move_dropped_email_to_processing,
+)
 from watchdog_logging import log
 from watchdog_models import EmailConfig, normalize_email_path
 from watchdog_redirects import (
@@ -57,6 +61,7 @@ def create_web_app(
     app.router.add_put("/api/redirects", api_put_redirects)
     app.router.add_get("/api/dropped-emails", api_get_dropped_emails)
     app.router.add_post("/api/dropped-emails/delete", api_delete_dropped_emails)
+    app.router.add_post("/api/dropped-emails/continue", api_continue_dropped_emails)
 
     web_dir = Path(__file__).parent / "web"
     app.router.add_get("/", serve_index)
@@ -162,6 +167,36 @@ async def api_delete_dropped_emails(request: web.Request) -> web.Response:
         log.info("Dropped emails deleted via web UI: %s", deleted)
 
     return web.json_response({"deleted": deleted, "skipped": skipped})
+
+
+async def api_continue_dropped_emails(request: web.Request) -> web.Response:
+    _require_token(request)
+    email_cfg = _require_email_cfg(request)
+    payload = await request.json()
+    filenames = payload.get("filenames")
+    if not isinstance(filenames, list):
+        raise web.HTTPBadRequest(reason="'filenames' must be a list")
+
+    continued: list[str] = []
+    skipped: list[str] = []
+    seen: set[str] = set()
+    for raw_name in filenames:
+        if not isinstance(raw_name, str):
+            continue
+        filename = raw_name.strip()
+        if not filename or filename in seen:
+            continue
+        seen.add(filename)
+
+        if move_dropped_email_to_processing(email_cfg, filename):
+            continued.append(filename)
+        else:
+            skipped.append(filename)
+
+    if continued:
+        log.info("Dropped emails resumed via web UI: %s", continued)
+
+    return web.json_response({"continued": continued, "skipped": skipped})
 
 
 async def serve_index(_: web.Request) -> web.FileResponse:

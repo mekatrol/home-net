@@ -33,6 +33,11 @@ interface DeleteDroppedEmailApiResponse {
   skipped: string[]
 }
 
+interface ContinueDroppedEmailApiResponse {
+  continued: string[]
+  skipped: string[]
+}
+
 const TOKEN_STORAGE_KEY = 'redirect-manager-token'
 const API_BASE_URL = __API_BASE_URL__
 
@@ -92,6 +97,7 @@ export const useRedirectStore = defineStore('redirects', () => {
   const loading = ref(false)
   const saving = ref(false)
   const deletingDroppedEmails = ref(false)
+  const continuingDroppedEmails = ref(false)
   const error = ref('')
   const success = ref('')
 
@@ -242,6 +248,40 @@ export const useRedirectStore = defineStore('redirects', () => {
     }
   }
 
+  async function continueDroppedEmailSelection(filenames: string[]): Promise<void> {
+    clearMessages()
+    if (!filenames.length) {
+      return
+    }
+
+    continuingDroppedEmails.value = true
+    try {
+      const response = await fetch(apiUrl('/api/dropped-emails/continue'), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ filenames }),
+      })
+      if (!response.ok) {
+        throw new Error(await readError(response))
+      }
+
+      const payload = (await response.json()) as ContinueDroppedEmailApiResponse
+      const continuedSet = new Set(payload.continued)
+      droppedEmails.value = droppedEmails.value.filter((email) => !continuedSet.has(email.filename))
+      success.value =
+        payload.continued.length > 0
+          ? `Continued processing for ${payload.continued.length} dropped email${payload.continued.length === 1 ? '' : 's'}.`
+          : 'No dropped emails were continued.'
+      if (payload.skipped.length > 0) {
+        error.value = `Skipped ${payload.skipped.length} file${payload.skipped.length === 1 ? '' : 's'} that could not be continued.`
+      }
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to continue dropped emails.'
+    } finally {
+      continuingDroppedEmails.value = false
+    }
+  }
+
   function addRedirect(): void {
     redirects.value.push(createEmptyRedirect())
   }
@@ -270,6 +310,8 @@ export const useRedirectStore = defineStore('redirects', () => {
   return {
     addRedirect,
     addRule,
+    continueDroppedEmailSelection,
+    continuingDroppedEmails,
     deleteDroppedEmailSelection,
     deletingDroppedEmails,
     droppedEmails,

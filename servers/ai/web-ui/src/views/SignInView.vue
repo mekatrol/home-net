@@ -12,7 +12,7 @@ const { error, loading, success, token } = storeToRefs(redirectStore)
 async function signIn(): Promise<void> {
   const signedIn = await redirectStore.loadAdminData()
   if (signedIn) {
-    void router.push('/dropped')
+    void router.push('/redirects')
   }
 }
 </script>
