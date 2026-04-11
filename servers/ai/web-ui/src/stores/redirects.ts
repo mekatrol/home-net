@@ -18,6 +18,11 @@ interface RedirectApiResponse {
 }
 
 const TOKEN_STORAGE_KEY = 'redirect-manager-token'
+const API_BASE_URL = __API_BASE_URL__
+
+function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`
+}
 
 function createEmptyRule(): RedirectRule {
   return {
@@ -87,7 +92,7 @@ export const useRedirectStore = defineStore('redirects', () => {
     clearMessages()
     loading.value = true
     try {
-      const response = await fetch('/api/redirects', {
+      const response = await fetch(apiUrl('/api/redirects'), {
         headers: authHeaders(),
       })
       if (!response.ok) {
@@ -114,7 +119,7 @@ export const useRedirectStore = defineStore('redirects', () => {
 
     saving.value = true
     try {
-      const response = await fetch('/api/redirects', {
+      const response = await fetch(apiUrl('/api/redirects'), {
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify({

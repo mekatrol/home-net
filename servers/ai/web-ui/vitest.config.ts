@@ -1,9 +1,17 @@
+import type { ConfigEnv } from 'vite'
 import { fileURLToPath } from 'node:url'
 import { mergeConfig, defineConfig, configDefaults } from 'vitest/config'
 import viteConfig from './vite.config'
 
+const testConfigEnv: ConfigEnv = {
+  command: 'build',
+  mode: 'test',
+  isSsrBuild: false,
+  isPreview: false,
+}
+
 export default mergeConfig(
-  viteConfig,
+  viteConfig(testConfigEnv),
   defineConfig({
     test: {
       environment: 'jsdom',

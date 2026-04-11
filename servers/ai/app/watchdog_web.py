@@ -14,6 +14,10 @@ from watchdog_redirects import (
     save_redirects_config,
 )
 
+DEV_CORS_ALLOWED_ORIGINS = {"http://localhost:5174"}
+API_CORS_ALLOWED_HEADERS = "Authorization, Content-Type, X-Admin-Token"
+API_CORS_ALLOWED_METHODS = "GET, PUT, OPTIONS"
+
 
 class RedirectConfigStore:
     def __init__(self, path: Path):
@@ -37,7 +41,7 @@ class RedirectConfigStore:
 
 
 def create_web_app(web_pwd: str, store: RedirectConfigStore) -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[api_cors_middleware])
     app["web_pwd"] = web_pwd
     app["redirect_store"] = store
 
@@ -107,6 +111,30 @@ async def api_put_redirects(request: web.Request) -> web.Response:
 
 async def serve_index(_: web.Request) -> web.FileResponse:
     return web.FileResponse(Path(__file__).parent / "web" / "index.html")
+
+
+@web.middleware
+async def api_cors_middleware(request: web.Request, handler) -> web.StreamResponse:
+    if not request.path.startswith("/api/"):
+        return await handler(request)
+
+    origin = request.headers.get("Origin")
+    if request.method == "OPTIONS":
+        response = web.Response(status=204)
+    else:
+        try:
+            response = await handler(request)
+        except web.HTTPException as exc:
+            response = exc
+
+    if origin in DEV_CORS_ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Headers"] = API_CORS_ALLOWED_HEADERS
+        response.headers["Access-Control-Allow-Methods"] = API_CORS_ALLOWED_METHODS
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+
+    return response
 
 
 def _require_token(request: web.Request) -> None:
