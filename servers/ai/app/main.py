@@ -109,6 +109,7 @@ async def main() -> None:
             web_cfg.port,
             web_cfg.web_pwd,
             RedirectConfigStore(config_path.with_name("email_config.yaml")),
+            email_cfg,
         ),
     ]
 

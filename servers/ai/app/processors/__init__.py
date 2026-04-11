@@ -1,4 +1,7 @@
+import datetime
+import email as email_lib
 import json
+from email.utils import getaddresses
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -16,6 +19,7 @@ SUBPROCESSORS: tuple[tuple[str, Subprocessor], ...] = (
     ("spam detector", run_spam_detector),
     ("redirection detector", run_redirection_detector),
 )
+RECIPIENT_HEADERS = ("To", "Cc", "Bcc")
 
 
 def metadata_path_for(email_path: Path) -> Path:
@@ -67,6 +71,7 @@ def process_email(
             for key, value in context.items()
             if key not in {"destination_dir", "dropped_dir"}
         }
+        metadata_context.update(_extract_email_summary(destination_path))
         tmp_metadata_path.write_text(
             json.dumps(metadata_context),
             encoding="utf-8",
@@ -87,6 +92,41 @@ def process_email(
         except FileNotFoundError:
             pass
         raise
+
+
+def _extract_email_summary(email_path: Path) -> dict[str, Any]:
+    raw = email_path.read_bytes()
+    msg = email_lib.message_from_bytes(raw)
+    recipients = sorted(
+        {
+            address.strip().lower()
+            for _, address in getaddresses(
+                [value for header in RECIPIENT_HEADERS for value in msg.get_all(header, [])]
+            )
+            if address.strip()
+        }
+    )
+    sender_values = [
+        address.strip().lower()
+        for _, address in getaddresses(msg.get_all("From", []))
+        if address.strip()
+    ]
+    return {
+        "sender": sender_values[0] if sender_values else "",
+        "recipients": recipients,
+        "received_at": _received_at_from_name(email_path),
+    }
+
+
+def _received_at_from_name(email_path: Path) -> str:
+    try:
+        parsed = datetime.datetime.strptime(email_path.stem, "%Y%m%d_%H%M%S_%f")
+        return parsed.replace(tzinfo=datetime.timezone.utc).isoformat()
+    except ValueError:
+        return datetime.datetime.fromtimestamp(
+            email_path.stat().st_mtime,
+            tz=datetime.timezone.utc,
+        ).isoformat()
 
 
 __all__ = ["metadata_path_for", "process_email"]

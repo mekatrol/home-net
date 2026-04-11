@@ -13,8 +13,24 @@ export interface RedirectEntry {
   rules: RedirectRule[]
 }
 
+export interface DroppedEmailEntry {
+  filename: string
+  recipient: string
+  sender: string
+  received_at: string
+}
+
 interface RedirectApiResponse {
   redirects: RedirectEntry[]
+}
+
+interface DroppedEmailApiResponse {
+  emails: DroppedEmailEntry[]
+}
+
+interface DeleteDroppedEmailApiResponse {
+  deleted: string[]
+  skipped: string[]
 }
 
 const TOKEN_STORAGE_KEY = 'redirect-manager-token'
@@ -50,6 +66,15 @@ function cloneRedirectEntry(redirect: RedirectEntry): RedirectEntry {
   }
 }
 
+function cloneDroppedEmailEntry(email: DroppedEmailEntry): DroppedEmailEntry {
+  return {
+    filename: email.filename ?? '',
+    recipient: email.recipient ?? '',
+    sender: email.sender ?? '',
+    received_at: email.received_at ?? '',
+  }
+}
+
 async function readError(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as Record<string, string>
@@ -62,17 +87,21 @@ async function readError(response: Response): Promise<string> {
 export const useRedirectStore = defineStore('redirects', () => {
   const token = ref<string>(localStorage.getItem(TOKEN_STORAGE_KEY) ?? '')
   const redirects = ref<RedirectEntry[]>([])
+  const droppedEmails = ref<DroppedEmailEntry[]>([])
   const hasLoaded = ref(false)
   const loading = ref(false)
   const saving = ref(false)
+  const deletingDroppedEmails = ref(false)
   const error = ref('')
   const success = ref('')
 
   const summary = computed(() => {
     const catchallCount = redirects.value.length
     const ruleCount = redirects.value.reduce((count, redirect) => count + redirect.rules.length, 0)
-    return `${catchallCount} destinations, ${ruleCount} rules`
+    return `${catchallCount} destinations, ${ruleCount} rules, ${droppedEmails.value.length} dropped`
   })
+
+  const isAuthenticated = computed(() => hasLoaded.value && Boolean(token.value))
 
   function clearMessages(): void {
     error.value = ''
@@ -88,9 +117,7 @@ export const useRedirectStore = defineStore('redirects', () => {
       : { 'Content-Type': 'application/json' }
   }
 
-  async function loadRedirects(): Promise<void> {
-    clearMessages()
-    loading.value = true
+  async function loadRedirects(): Promise<boolean> {
     try {
       const response = await fetch(apiUrl('/api/redirects'), {
         headers: authHeaders(),
@@ -101,10 +128,44 @@ export const useRedirectStore = defineStore('redirects', () => {
 
       const payload = (await response.json()) as RedirectApiResponse
       redirects.value = payload.redirects.map(cloneRedirectEntry)
-      hasLoaded.value = true
-      localStorage.setItem(TOKEN_STORAGE_KEY, token.value)
+      return true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to load redirects.'
+      return false
+    }
+  }
+
+  async function loadDroppedEmails(): Promise<boolean> {
+    try {
+      const response = await fetch(apiUrl('/api/dropped-emails'), {
+        headers: authHeaders(),
+      })
+      if (!response.ok) {
+        throw new Error(await readError(response))
+      }
+
+      const payload = (await response.json()) as DroppedEmailApiResponse
+      droppedEmails.value = payload.emails.map(cloneDroppedEmailEntry)
+      return true
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to load dropped emails.'
+      return false
+    }
+  }
+
+  async function loadAdminData(): Promise<boolean> {
+    clearMessages()
+    loading.value = true
+    try {
+      const [redirectsLoaded, droppedLoaded] = await Promise.all([
+        loadRedirects(),
+        loadDroppedEmails(),
+      ])
+      hasLoaded.value = redirectsLoaded && droppedLoaded
+      if (hasLoaded.value) {
+        localStorage.setItem(TOKEN_STORAGE_KEY, token.value)
+      }
+      return hasLoaded.value
     } finally {
       loading.value = false
     }
@@ -147,6 +208,40 @@ export const useRedirectStore = defineStore('redirects', () => {
     }
   }
 
+  async function deleteDroppedEmailSelection(filenames: string[]): Promise<void> {
+    clearMessages()
+    if (!filenames.length) {
+      return
+    }
+
+    deletingDroppedEmails.value = true
+    try {
+      const response = await fetch(apiUrl('/api/dropped-emails/delete'), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ filenames }),
+      })
+      if (!response.ok) {
+        throw new Error(await readError(response))
+      }
+
+      const payload = (await response.json()) as DeleteDroppedEmailApiResponse
+      const deletedSet = new Set(payload.deleted)
+      droppedEmails.value = droppedEmails.value.filter((email) => !deletedSet.has(email.filename))
+      success.value =
+        payload.deleted.length > 0
+          ? `Deleted ${payload.deleted.length} dropped email${payload.deleted.length === 1 ? '' : 's'}.`
+          : 'No dropped emails were deleted.'
+      if (payload.skipped.length > 0) {
+        error.value = `Skipped ${payload.skipped.length} file${payload.skipped.length === 1 ? '' : 's'} that could not be deleted.`
+      }
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to delete dropped emails.'
+    } finally {
+      deletingDroppedEmails.value = false
+    }
+  }
+
   function addRedirect(): void {
     redirects.value.push(createEmptyRedirect())
   }
@@ -163,11 +258,26 @@ export const useRedirectStore = defineStore('redirects', () => {
     redirects.value[redirectIndex]?.rules.splice(ruleIndex, 1)
   }
 
+  function signOut(): void {
+    token.value = ''
+    redirects.value = []
+    droppedEmails.value = []
+    hasLoaded.value = false
+    clearMessages()
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
+  }
+
   return {
     addRedirect,
     addRule,
+    deleteDroppedEmailSelection,
+    deletingDroppedEmails,
+    droppedEmails,
     error,
     hasLoaded,
+    isAuthenticated,
+    loadAdminData,
+    loadDroppedEmails,
     loadRedirects,
     loading,
     redirects,
@@ -175,6 +285,7 @@ export const useRedirectStore = defineStore('redirects', () => {
     removeRule,
     saveRedirects,
     saving,
+    signOut,
     success,
     summary,
     token,

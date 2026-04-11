@@ -20,6 +20,7 @@ PROCESSING_SCAN_INTERVAL = 10
 PROCESSED_SCAN_INTERVAL = 10
 SENT_CLEAN_INTERVAL = 3600
 DROPPED_CLEAN_INTERVAL = 3600
+RECIPIENT_HEADERS = ("To", "Cc", "Bcc")
 
 
 def _fetch_emails_sync(
@@ -84,6 +85,116 @@ def _extract_message_recipients(raw: bytes) -> list[str]:
         for _, address in getaddresses(msg.get_all("To", []))
         if address.strip()
     ]
+
+
+def _extract_all_message_recipients(raw: bytes) -> list[str]:
+    msg = email_lib.message_from_bytes(raw)
+    recipients = {
+        address.strip().lower()
+        for _, address in getaddresses(
+            [value for header in RECIPIENT_HEADERS for value in msg.get_all(header, [])]
+        )
+        if address.strip()
+    }
+    return sorted(recipients)
+
+
+def _extract_message_sender(raw: bytes) -> str:
+    msg = email_lib.message_from_bytes(raw)
+    senders = [
+        address.strip().lower()
+        for _, address in getaddresses(msg.get_all("From", []))
+        if address.strip()
+    ]
+    return senders[0] if senders else ""
+
+
+def _received_at_from_name_or_stat(eml_path: Path) -> str:
+    stem = eml_path.stem
+    try:
+        parsed = datetime.datetime.strptime(stem, "%Y%m%d_%H%M%S_%f")
+        return parsed.replace(tzinfo=datetime.timezone.utc).isoformat()
+    except ValueError:
+        return datetime.datetime.fromtimestamp(
+            eml_path.stat().st_mtime,
+            tz=datetime.timezone.utc,
+        ).isoformat()
+
+
+def delete_email_with_metadata(eml_path: Path) -> bool:
+    if not eml_path.exists():
+        return False
+
+    try:
+        eml_path.unlink()
+    except FileNotFoundError:
+        return False
+    metadata_path = metadata_path_for(eml_path)
+    if metadata_path.exists():
+        metadata_path.unlink()
+    return True
+
+
+def list_dropped_emails(cfg: EmailConfig) -> list[dict[str, str]]:
+    dropped_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username) / "dropped"
+    dropped_dir.mkdir(parents=True, exist_ok=True)
+
+    entries: list[dict[str, str]] = []
+    for eml_path in dropped_dir.glob("*.eml"):
+        metadata_path = metadata_path_for(eml_path)
+        metadata: dict[str, object] = {}
+        if metadata_path.exists():
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except Exception as exc:
+                email_log.warning(
+                    "Dropped listing: failed to read metadata for %s: %s",
+                    eml_path.name,
+                    exc,
+                )
+
+        raw = b""
+        if not metadata.get("sender") or not metadata.get("recipients"):
+            try:
+                raw = eml_path.read_bytes()
+            except Exception as exc:
+                email_log.warning(
+                    "Dropped listing: failed to read %s for fallback metadata: %s",
+                    eml_path.name,
+                    exc,
+                )
+
+        recipients = metadata.get("recipients")
+        recipient_list = (
+            [str(item).strip() for item in recipients if str(item).strip()]
+            if isinstance(recipients, list)
+            else []
+        )
+        if not recipient_list and raw:
+            recipient_list = _extract_all_message_recipients(raw)
+
+        sender = str(metadata.get("sender", "")).strip()
+        if not sender and raw:
+            sender = _extract_message_sender(raw)
+
+        received_at = str(metadata.get("received_at", "")).strip()
+        if not received_at:
+            received_at = _received_at_from_name_or_stat(eml_path)
+
+        entries.append(
+            {
+                "filename": eml_path.name,
+                "recipient": ", ".join(recipient_list),
+                "sender": sender,
+                "received_at": received_at,
+            }
+        )
+
+    entries.sort(
+        key=lambda entry: (entry["received_at"], entry["filename"]),
+        reverse=True,
+    )
+    return entries
 
 
 async def email_poller(cfg: EmailConfig) -> None:
@@ -271,10 +382,7 @@ async def sent_cleaner(cfg: EmailConfig) -> None:
             )
             for eml_path in sent_dir.glob("*.eml"):
                 if eml_path.stat().st_mtime < cutoff:
-                    eml_path.unlink()
-                    metadata_path = metadata_path_for(eml_path)
-                    if metadata_path.exists():
-                        metadata_path.unlink()
+                    delete_email_with_metadata(eml_path)
                     email_log.info(
                         "Sent cleaner: deleted %s (older than %d days)",
                         eml_path.name,
@@ -305,10 +413,7 @@ async def dropped_cleaner(cfg: EmailConfig) -> None:
             )
             for eml_path in dropped_dir.glob("*.eml"):
                 if eml_path.stat().st_mtime < cutoff:
-                    eml_path.unlink()
-                    metadata_path = metadata_path_for(eml_path)
-                    if metadata_path.exists():
-                        metadata_path.unlink()
+                    delete_email_with_metadata(eml_path)
                     email_log.info(
                         "Dropped cleaner: deleted %s (older than %d days)",
                         eml_path.name,

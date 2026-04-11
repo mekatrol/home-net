@@ -7,7 +7,9 @@ from typing import Any
 
 from aiohttp import web
 
+from watchdog_email import delete_email_with_metadata, list_dropped_emails
 from watchdog_logging import log
+from watchdog_models import EmailConfig, normalize_email_path
 from watchdog_redirects import (
     load_redirects_config,
     normalize_redirects_config,
@@ -16,7 +18,7 @@ from watchdog_redirects import (
 
 DEV_CORS_ALLOWED_ORIGINS = {"http://localhost:5174"}
 API_CORS_ALLOWED_HEADERS = "Authorization, Content-Type, X-Admin-Token"
-API_CORS_ALLOWED_METHODS = "GET, PUT, OPTIONS"
+API_CORS_ALLOWED_METHODS = "GET, PUT, POST, OPTIONS"
 
 
 class RedirectConfigStore:
@@ -40,14 +42,21 @@ class RedirectConfigStore:
             return _clone_redirects(self._cache)
 
 
-def create_web_app(web_pwd: str, store: RedirectConfigStore) -> web.Application:
+def create_web_app(
+    web_pwd: str,
+    store: RedirectConfigStore,
+    email_cfg: EmailConfig | None = None,
+) -> web.Application:
     app = web.Application(middlewares=[api_cors_middleware])
     app["web_pwd"] = web_pwd
     app["redirect_store"] = store
+    app["email_cfg"] = email_cfg
 
     app.router.add_get("/api/health", api_health)
     app.router.add_get("/api/redirects", api_get_redirects)
     app.router.add_put("/api/redirects", api_put_redirects)
+    app.router.add_get("/api/dropped-emails", api_get_dropped_emails)
+    app.router.add_post("/api/dropped-emails/delete", api_delete_dropped_emails)
 
     web_dir = Path(__file__).parent / "web"
     app.router.add_get("/", serve_index)
@@ -61,8 +70,9 @@ async def start_web_server(
     port: int,
     web_pwd: str,
     store: RedirectConfigStore,
+    email_cfg: EmailConfig | None = None,
 ) -> None:
-    app = create_web_app(web_pwd, store)
+    app = create_web_app(web_pwd, store, email_cfg)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, host, port)
@@ -112,6 +122,48 @@ async def api_put_redirects(request: web.Request) -> web.Response:
     return web.json_response({"redirects": _serialize_redirects_for_api(saved)})
 
 
+async def api_get_dropped_emails(request: web.Request) -> web.Response:
+    _require_token(request)
+    email_cfg = _require_email_cfg(request)
+    dropped_emails = list_dropped_emails(email_cfg)
+    return web.json_response({"emails": dropped_emails})
+
+
+async def api_delete_dropped_emails(request: web.Request) -> web.Response:
+    _require_token(request)
+    email_cfg = _require_email_cfg(request)
+    payload = await request.json()
+    filenames = payload.get("filenames")
+    if not isinstance(filenames, list):
+        raise web.HTTPBadRequest(reason="'filenames' must be a list")
+
+    dropped_dir = Path(email_cfg.store_dir) / normalize_email_path(email_cfg.username) / "dropped"
+    deleted: list[str] = []
+    skipped: list[str] = []
+    seen: set[str] = set()
+    for raw_name in filenames:
+        if not isinstance(raw_name, str):
+            continue
+        filename = raw_name.strip()
+        if not filename or filename in seen:
+            continue
+        seen.add(filename)
+
+        candidate = dropped_dir / filename
+        if candidate.suffix != ".eml" or candidate.parent != dropped_dir:
+            skipped.append(filename)
+            continue
+        if delete_email_with_metadata(candidate):
+            deleted.append(filename)
+        else:
+            skipped.append(filename)
+
+    if deleted:
+        log.info("Dropped emails deleted via web UI: %s", deleted)
+
+    return web.json_response({"deleted": deleted, "skipped": skipped})
+
+
 async def serve_index(_: web.Request) -> web.FileResponse:
     return web.FileResponse(Path(__file__).parent / "web" / "index.html")
 
@@ -150,6 +202,13 @@ def _require_token(request: web.Request) -> None:
         provided = request.headers.get("X-Admin-Token", "").strip()
     if provided != expected:
         raise web.HTTPUnauthorized(reason="Invalid web password")
+
+
+def _require_email_cfg(request: web.Request) -> EmailConfig:
+    email_cfg = request.app.get("email_cfg")
+    if not isinstance(email_cfg, EmailConfig):
+        raise web.HTTPServiceUnavailable(reason="Email features are not configured")
+    return email_cfg
 
 
 def _normalize_redirects_payload(
