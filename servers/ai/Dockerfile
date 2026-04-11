@@ -73,6 +73,9 @@ service ssh start
 # Fix directory ownership — volume mounts overwrite build-time chown
 chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/log/home-monitor
 chown ${SSH_USER_NAME}:${SSH_USER_NAME} /var/lib/emails
+if [ -d /run/config ]; then
+    chown -R ${SSH_USER_NAME}:${SSH_USER_NAME} /run/config
+fi
 
 # Generate self-signed TLS cert for WebSocket server if not already present
 if [ ! -f /var/lib/watchdog-server/server.crt ]; then

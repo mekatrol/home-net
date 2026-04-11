@@ -27,8 +27,8 @@ import yaml
 
 
 def load_config() -> tuple[str, str]:
-    """Read token and server URL from secrets/config.yaml."""
-    config_path = Path(__file__).parent.parent / "secrets" / "config.yaml"
+    """Read token and server URL from run/config/config.yaml."""
+    config_path = Path(__file__).parent.parent / "run" / "config" / "config.yaml"
     if not config_path.exists():
         print(f"Error: config not found at {config_path}", file=sys.stderr)
         sys.exit(1)

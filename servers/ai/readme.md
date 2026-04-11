@@ -29,14 +29,14 @@ Both are deployed in a single idempotent script.
 Run once on the machine hosting the Docker container, from the `servers/ai/` directory:
 
 ```bash
-ssh-keygen -t ed25519 -f ./secrets/watchdog_key -N "" -C "home-monitor-watchdog"
+ssh-keygen -t ed25519 -f ./run/secrets/watchdog_key -N "" -C "home-monitor-watchdog"
 ```
 
 This creates:
-- `./secrets/watchdog_key` — private key (mounted into the container at `/run/secrets/watchdog_key`)
-- `./secrets/watchdog_key.pub` — public key (deployed to each monitored Pi by the script)
+- `./run/secrets/watchdog_key` — private key (mounted into the container at `/run/secrets/watchdog_key`)
+- `./run/secrets/watchdog_key.pub` — public key (deployed to each monitored Pi by the script)
 
-> **Note:** Never commit `secrets/` to git.
+> **Note:** Never commit `run/` to git.
 
 ---
 
@@ -65,7 +65,7 @@ prompt** for the entire process.
    key is stolen, an attacker can only trigger commands on the allowlist.
 3. Configures `/etc/sudoers.d/watchdog` so the `watchdog` user can only run
    the specific binaries called from the dispatcher (`/sbin/reboot`, `/usr/bin/apt`)
-4. Installs `secrets/watchdog_key.pub` into `/home/watchdog/.ssh/authorized_keys`
+4. Installs `run/secrets/watchdog_key.pub` into `/home/watchdog/.ssh/authorized_keys`
    with a `command=` restriction that forces every SSH connection through the
    dispatcher, regardless of what the client requests
 5. Verifies the dispatcher is working by confirming it rejects an unknown command
@@ -89,13 +89,31 @@ the SSH key, or updating the ping service code.
 
 ## Deploy the monitor container
 
-Place your real config at `./secrets/config.yaml` — see `app/config.example.yaml`
+Place your real config at `./run/config/config.yaml` — see `app/config.example.yaml`
 for the format. Each device entry's `mqtt_topic` must match the topic you
 configured when running `deploy.sh` on that Pi.
+
+Secrets such as `watchdog_key` stay under `./run/secrets/`. Redirect settings
+for the web UI live in `./run/config/redirects_config.yaml`.
 
 ```bash
 SSH_USER_NAME="ssh" SSH_USER_PASSWORD="changeme" HOSTNAME="ai.lan" DNSHOST="9.9.9.9" TIMEZONE="Australia/Sydney" ./create.sh
 ```
+
+## Redirect manager web UI
+
+The monitor now also starts an HTTP web server for managing
+`redirects_config.yaml`.
+
+- Default URL: `http://<container-ip>:8080/`
+- Auth: enter `web.web_pwd` from `config.yaml`
+- API:
+  - `GET /api/redirects`
+  - `PUT /api/redirects`
+
+The UI writes back to the same mounted config file used by the email
+processing pipeline, so redirect changes apply without rebuilding the
+container.
 
 ---
 

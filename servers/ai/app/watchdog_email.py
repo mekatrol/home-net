@@ -13,6 +13,7 @@ from pathlib import Path
 from processors import metadata_path_for, process_email
 from watchdog_logging import email_log
 from watchdog_models import EmailConfig, normalize_email_path
+from watchdog_redirects import load_redirects_config
 
 INBOX_SCAN_INTERVAL = 10
 PROCESSING_SCAN_INTERVAL = 10
@@ -160,13 +161,17 @@ async def processing_processor(cfg: EmailConfig) -> None:
 
     while True:
         try:
+            redirects = cfg.redirects
+            if cfg.redirects_path:
+                redirects = load_redirects_config(Path(cfg.redirects_path))
+                cfg.redirects = redirects
             for eml_path in sorted(processing_dir.glob("*.eml")):
                 processed_path = process_email(
                     eml_path,
                     processed_dir,
                     {
                         "catchall_email": default_catchall_to,
-                        "redirects": cfg.redirects,
+                        "redirects": redirects,
                     },
                 )
                 if processed_path is None:

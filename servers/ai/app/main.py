@@ -26,6 +26,7 @@ from watchdog_schedulers import (
     watchdog_loop,
 )
 from watchdog_server import WatchdogServer
+from watchdog_web import RedirectConfigStore, start_web_server
 
 
 def _log_device_startup(devices) -> None:
@@ -69,14 +70,20 @@ def _publish_initial_statuses(
 
 
 async def main() -> None:
-    config_path = Path("/run/secrets/config.yaml")
+    config_path = Path("/run/config/config.yaml")
     if not config_path.exists():
         config_path = Path(__file__).parent / "config.yaml"
 
     log.info("Loading config from %s", config_path)
-    server_cfg, mqtt_cfg, devices, log_levels, status_interval, email_cfg = load_config(
-        config_path
-    )
+    (
+        server_cfg,
+        mqtt_cfg,
+        devices,
+        log_levels,
+        status_interval,
+        email_cfg,
+        web_cfg,
+    ) = load_config(config_path)
     set_log_levels(
         watchdog_level=log_levels["watchdog"],
         email_level=log_levels["email"],
@@ -96,6 +103,12 @@ async def main() -> None:
         watchdog_loop(states),
         upgrade_scheduler(states),
         upgrade_reboot_scheduler(states),
+        start_web_server(
+            web_cfg.host,
+            web_cfg.port,
+            web_cfg.web_pwd,
+            RedirectConfigStore(config_path.with_name("redirects_config.yaml")),
+        ),
     ]
 
     bridge: Optional[MqttBridge] = None

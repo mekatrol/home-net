@@ -1,0 +1,229 @@
+:root {
+  --bg: #f4efe7;
+  --panel: rgba(255, 250, 243, 0.92);
+  --panel-strong: #fffaf2;
+  --line: rgba(83, 61, 44, 0.14);
+  --text: #2f241d;
+  --muted: #7a6656;
+  --accent: #a44620;
+  --accent-dark: #7d3215;
+  --danger: #8f2d24;
+  --success: #255f46;
+  --shadow: 0 22px 50px rgba(91, 66, 44, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(196, 112, 46, 0.18), transparent 30%),
+    radial-gradient(circle at top right, rgba(64, 117, 91, 0.12), transparent 25%),
+    linear-gradient(180deg, #efe4d3 0%, #f8f4ee 45%, #f4efe7 100%);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.8rem 1.25rem;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+button:hover {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+button.secondary,
+button.ghost {
+  background: #eadbca;
+  color: var(--text);
+}
+
+button.danger {
+  background: var(--danger);
+}
+
+.shell {
+  width: min(1100px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 3rem;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 1.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(2.2rem, 6vw, 4.6rem);
+  line-height: 0.95;
+}
+
+.lede {
+  margin-top: 0.75rem;
+  color: var(--muted);
+}
+
+.summary-card,
+.panel,
+.redirect-card {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.summary-card {
+  padding: 1rem 1.2rem;
+  border-radius: 22px;
+  font-weight: 600;
+}
+
+.panel {
+  border-radius: 28px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.auth-panel {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  align-items: end;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.section-header,
+.redirect-header,
+.rule-row {
+  display: flex;
+  gap: 1rem;
+  align-items: end;
+}
+
+.section-header {
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.redirect-card {
+  border-radius: 24px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.rules {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1rem 0;
+}
+
+.field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field span {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.field input,
+.field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel-strong);
+  padding: 0.8rem 0.95rem;
+  color: var(--text);
+}
+
+.field.grow {
+  flex: 1;
+}
+
+.field.compact {
+  width: 140px;
+}
+
+.message {
+  grid-column: 1 / -1;
+  padding-top: 0.25rem;
+}
+
+.message.error {
+  color: var(--danger);
+}
+
+.message.success {
+  color: var(--success);
+}
+
+.empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 22px;
+  padding: 1rem;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+@media (max-width: 760px) {
+  .hero,
+  .auth-panel,
+  .section-header,
+  .redirect-header,
+  .rule-row {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .auth-actions {
+    flex-wrap: wrap;
+  }
+
+  .field.compact {
+    width: auto;
+  }
+}

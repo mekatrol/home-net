@@ -8,6 +8,8 @@ from typing import Any, Callable, Coroutine, Optional
 
 import yaml
 
+from watchdog_redirects import load_redirects_config
+
 CERT_DIR = Path("/var/lib/watchdog-server")
 CERT_FILE = CERT_DIR / "server.crt"
 KEY_FILE = CERT_DIR / "server.key"
@@ -56,6 +58,14 @@ class EmailConfig:
     sent_retention_days: int = 10
     catchall: dict = field(default_factory=dict)
     redirects: dict[str, list[dict[str, str]]] = field(default_factory=dict)
+    redirects_path: Optional[str] = None
+
+
+@dataclass
+class WebConfig:
+    host: str = "0.0.0.0"
+    port: int = 8080
+    web_pwd: str = ""
 
 
 def normalize_email_path(address: str) -> str:
@@ -99,6 +109,7 @@ def load_config(
     dict[str, int],
     int,
     Optional[EmailConfig],
+    WebConfig,
 ]:
     with open(path) as f:
         raw = yaml.safe_load(f)
@@ -125,15 +136,14 @@ def load_config(
         ),
     }
     status_interval = int(raw.get("status_interval", 10))
+    web_cfg = WebConfig(**raw.get("web", {}))
     email_cfg: Optional[EmailConfig] = None
     if "email" in raw:
         email_cfg = EmailConfig(**raw["email"])
         redirects_path = path.with_name("redirects_config.yaml")
-        if redirects_path.exists():
-            with open(redirects_path) as f:
-                redirects_raw = yaml.safe_load(f) or {}
-            email_cfg.redirects = _normalize_redirects_config(redirects_raw)
-    return server_cfg, mqtt_cfg, devices, log_levels, status_interval, email_cfg
+        email_cfg.redirects_path = str(redirects_path)
+        email_cfg.redirects = load_redirects_config(redirects_path)
+    return server_cfg, mqtt_cfg, devices, log_levels, status_interval, email_cfg, web_cfg
 
 
 def _parse_log_level(value: Any) -> int:
@@ -144,55 +154,6 @@ def _parse_log_level(value: Any) -> int:
         if isinstance(parsed, int):
             return parsed
     return logging.INFO
-
-
-def _normalize_redirects_config(raw: Any) -> dict[str, list[dict[str, str]]]:
-    redirects = raw.get("redirects", raw) if isinstance(raw, dict) else {}
-    normalized: dict[str, list[dict[str, str]]] = {}
-    for catchall_email, rules in redirects.items():
-        if not isinstance(catchall_email, str):
-            continue
-        catchall_email = catchall_email.strip().lower()
-        if "@" not in catchall_email:
-            continue
-
-        _, domain = catchall_email.rsplit("@", 1)
-        normalized_rules: list[dict[str, str]] = []
-        raw_rules = rules if isinstance(rules, list) else []
-        for rule in raw_rules:
-            if isinstance(rule, str):
-                value = rule.strip()
-                if not value:
-                    continue
-                if value.lower().startswith("regex:"):
-                    pattern = value[6:].strip()
-                    if pattern:
-                        normalized_rules.append({"type": "regex", "value": pattern})
-                    continue
-                address = value.lower()
-                if "@" not in address:
-                    address = f"{address}@{domain}"
-                normalized_rules.append({"type": "exact", "value": address})
-                continue
-
-            if not isinstance(rule, dict):
-                continue
-
-            exact_value = rule.get("exact") or rule.get("address")
-            if isinstance(exact_value, str) and exact_value.strip():
-                address = exact_value.strip().lower()
-                if "@" not in address:
-                    address = f"{address}@{domain}"
-                normalized_rules.append({"type": "exact", "value": address})
-
-            regex_value = rule.get("regex")
-            if isinstance(regex_value, str) and regex_value.strip():
-                normalized_rules.append(
-                    {"type": "regex", "value": regex_value.strip()}
-                )
-
-        normalized[catchall_email] = normalized_rules
-    return normalized
 
 
 def ensure_tls_cert() -> ssl.SSLContext:

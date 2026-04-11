@@ -44,6 +44,8 @@ NETWORK_GATEWAY="172.16.3.1"
 # Static IP address for the server host
 CONTAINER_IP_ADDR="172.16.3.100"
 
+mkdir -p "$PWD/run/config" "$PWD/run/secrets"
+
 # Check if the network exists
 if ! docker network inspect "$NETWORK_NAME" >/dev/null 2>&1; then
     echo "Network '$NETWORK_NAME' does not exist. Creating it..."
@@ -75,7 +77,8 @@ docker run \
     --ip="$CONTAINER_IP_ADDR" \
     --hostname="$HOSTNAME" \
     --dns "$DNSHOST" \
-    -v "$PWD/secrets:/run/secrets:ro" \
+    -v "$PWD/run/config:/run/config" \
+    -v "$PWD/run/secrets:/run/secrets:ro" \
     -v "$PWD/logs:/var/log/home-monitor" \
     -v "$PWD/emails:/var/lib/emails" \
     -e SSH_USER_NAME="$SSH_USER_NAME" \

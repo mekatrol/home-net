@@ -1,10 +1,15 @@
 # Home monitor watchdog config
-# Place the real version at /run/secrets/config.yaml (mounted from ./secrets/)
+# Place the real version at /run/config/config.yaml (mounted from ./run/config/)
 
 server:
   host: "0.0.0.0"
   port: 8765
   token: "change-me-to-something-secret"  # shared secret — same value in all device configs
+
+web:
+  host: "0.0.0.0"
+  port: 8080
+  web_pwd: "change-me-to-a-separate-web-password"
 
 # MQTT broker — only required if any devices use mqtt_topic (MQTT-only monitoring)
 mqtt:
@@ -14,9 +19,10 @@ mqtt:
   password: "secret"
 
 # Email — optional; enables POP3 polling and SMTP sending
-# Redirect overrides live in a sibling file named /run/secrets/redirects_config.yaml.
+# Redirect overrides live in a sibling file named /run/config/redirects_config.yaml.
 # That file maps catchall destination addresses to exact local-parts or regex rules
 # that should be sent there within the same destination domain.
+# The web UI also reads and updates that same redirects file over the REST API.
 # email:
 #   host: "mail.example.com"
 #   username: "user@example.com"
