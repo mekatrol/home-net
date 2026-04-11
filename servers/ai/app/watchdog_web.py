@@ -90,6 +90,16 @@ async def api_put_redirects(request: web.Request) -> web.Response:
 
     normalized_payload = _normalize_redirects_payload(redirects)
     store: RedirectConfigStore = request.app["redirect_store"]
+    current = await store.get()
+    current_rule_count = _count_rules(current)
+    new_rule_count = _count_rules(normalized_payload)
+    if current_rule_count > 0 and new_rule_count == 0:
+        raise web.HTTPBadRequest(
+            reason=(
+                "Refusing to remove all redirect rules at once. "
+                "Reload the current config before saving."
+            )
+        )
     saved = await store.save(normalized_payload)
     log.info("Redirect config updated via web UI: %d catchall destinations", len(saved))
     return web.json_response({"redirects": _serialize_redirects_for_api(saved)})
@@ -160,3 +170,7 @@ def _clone_redirects(
         catchall_email: [dict(rule) for rule in rules]
         for catchall_email, rules in redirects.items()
     }
+
+
+def _count_rules(redirects: dict[str, list[dict[str, str]]]) -> int:
+    return sum(len(rules) for rules in redirects.values())
