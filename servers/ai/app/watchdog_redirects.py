@@ -47,6 +47,21 @@ def normalize_redirects_config(raw: Any) -> dict[str, list[dict[str, str]]]:
             if not isinstance(rule, dict):
                 continue
 
+            rule_type = rule.get("type")
+            rule_value = rule.get("value")
+            if isinstance(rule_type, str) and isinstance(rule_value, str) and rule_value.strip():
+                normalized_type = rule_type.strip().lower()
+                normalized_value = rule_value.strip()
+                if normalized_type == "exact":
+                    address = normalized_value.lower()
+                    if "@" not in address:
+                        address = f"{address}@{domain}"
+                    normalized_rules.append({"type": "exact", "value": address})
+                    continue
+                if normalized_type == "regex":
+                    normalized_rules.append({"type": "regex", "value": normalized_value})
+                    continue
+
             exact_value = rule.get("exact") or rule.get("address")
             if isinstance(exact_value, str) and exact_value.strip():
                 address = exact_value.strip().lower()
