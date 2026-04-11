@@ -18,7 +18,7 @@ const { addRedirect, addRule, loadRedirects, removeRedirect, removeRule, saveRed
       <div>
         <p class="eyebrow">Watchdog Admin</p>
         <h1>Redirect Manager</h1>
-        <p class="lede">Manage catchall delivery rules in <code>redirects_config.yaml</code>.</p>
+        <p class="lede">Manage catchall delivery rules in <code>email_config.yaml</code>.</p>
       </div>
       <div class="summary-card">{{ summary }}</div>
     </section>

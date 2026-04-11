@@ -1,0 +1,39 @@
+# Email settings live in a standalone file so mail delivery, dropping and
+# redirects can be managed separately from the main watchdog config.
+# The web UI also reads and updates this same file's redirects section.
+#
+# host: "mail.example.com"
+# username: "user@example.com"
+# password: "secret"
+# pop3_port: 995                  # SSL/TLS (default)
+# smtp_port: 587                  # STARTTLS (default)
+# poll_interval: 60               # seconds between POP3 polls (default)
+# store_dir: "/var/lib/emails"    # host path mounted via create.sh volume (default)
+# sent_retention_days: 30         # delete sent/ files older than this many days (0 = keep forever)
+# dropped_retention_days: 10      # delete dropped/ files older than this many days (0 = keep forever)
+# allowed_domains:                # recipients outside these domains are dropped before other processors
+#   - "example.com"
+#   - "otherdomain.net"
+# drop:                           # exact full emails, or regex rules prefixed with "regex:"
+#   - "blocked@example.com"
+#   - "regex:^sales-.*@example\\.com$"
+# catchall:                       # per-domain forward address; omit to disable final sending
+#   example.com: "catchall@example.com"
+#   otherdomain.net: "catchall@otherdomain.net"
+#
+# Folder layout per account:
+#   {store_dir}/{normalized_address}/inbox/       — freshly received from POP3
+#   {store_dir}/{normalized_address}/processing/  — queued for AI spam filtering
+#   {store_dir}/{normalized_address}/dropped/     — blocked before delivery; auto-deleted after dropped_retention_days
+#   {store_dir}/{normalized_address}/processed/   — AI-approved output waiting to be sent
+#   {store_dir}/{normalized_address}/sent/        — forwarded successfully; auto-deleted after sent_retention_days
+# Files are written atomically (.tmp → rename) for stage hand-offs.
+# Messages are deleted from the POP3 server at fetch time.
+#
+# redirects:
+#   "finance@example.com":
+#     - "accounts@example.com"
+#     - "invoices@example.com"
+#     - "regex:^invoice-.*$"
+#   "support@example.com":
+#     - "helpdesk@example.com"

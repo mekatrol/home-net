@@ -105,7 +105,10 @@ async def api_put_redirects(request: web.Request) -> web.Response:
             )
         )
     saved = await store.save(normalized_payload)
-    log.info("Redirect config updated via web UI: %d catchall destinations", len(saved))
+    log.info(
+        "Email config redirects updated via web UI: %d catchall destinations",
+        len(saved),
+    )
     return web.json_response({"redirects": _serialize_redirects_for_api(saved)})
 
 

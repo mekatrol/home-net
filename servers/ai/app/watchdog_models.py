@@ -13,6 +13,7 @@ from watchdog_redirects import load_redirects_config
 CERT_DIR = Path("/var/lib/watchdog-server")
 CERT_FILE = CERT_DIR / "server.crt"
 KEY_FILE = CERT_DIR / "server.key"
+EMAIL_CONFIG_FILENAME = "email_config.yaml"
 
 
 @dataclass
@@ -56,9 +57,12 @@ class EmailConfig:
     poll_interval: int = 60
     store_dir: str = "/var/lib/emails"
     sent_retention_days: int = 10
+    dropped_retention_days: int = 10
     catchall: dict = field(default_factory=dict)
+    drop: list[str] = field(default_factory=list)
+    allowed_domains: list[str] = field(default_factory=list)
     redirects: dict[str, list[dict[str, str]]] = field(default_factory=dict)
-    redirects_path: Optional[str] = None
+    config_path: Optional[str] = None
 
 
 @dataclass
@@ -137,13 +141,31 @@ def load_config(
     }
     status_interval = int(raw.get("status_interval", 10))
     web_cfg = WebConfig(**raw.get("web", {}))
-    email_cfg: Optional[EmailConfig] = None
-    if "email" in raw:
-        email_cfg = EmailConfig(**raw["email"])
-        redirects_path = path.with_name("redirects_config.yaml")
-        email_cfg.redirects_path = str(redirects_path)
-        email_cfg.redirects = load_redirects_config(redirects_path)
+    email_cfg = load_email_config(path.with_name(EMAIL_CONFIG_FILENAME))
     return server_cfg, mqtt_cfg, devices, log_levels, status_interval, email_cfg, web_cfg
+
+
+def load_email_config(path: Path) -> Optional[EmailConfig]:
+    if not path.exists():
+        return None
+
+    with open(path, encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+
+    email_section = raw.get("email", raw) if isinstance(raw, dict) else {}
+    if not isinstance(email_section, dict) or not email_section:
+        return None
+
+    email_cfg = EmailConfig(
+        **{
+            key: value
+            for key, value in email_section.items()
+            if key in EmailConfig.__dataclass_fields__ and key not in {"redirects", "config_path"}
+        }
+    )
+    email_cfg.config_path = str(path)
+    email_cfg.redirects = load_redirects_config(path)
+    return email_cfg
 
 
 def _parse_log_level(value: Any) -> int:

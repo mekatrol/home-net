@@ -7,6 +7,23 @@ from typing import Any
 import yaml
 
 
+class _QuotedString(str):
+    pass
+
+
+class _RedirectConfigDumper(yaml.SafeDumper):
+    pass
+
+
+def _represent_quoted_string(
+    dumper: yaml.SafeDumper, data: _QuotedString
+) -> yaml.nodes.ScalarNode:
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data), style='"')
+
+
+_RedirectConfigDumper.add_representer(_QuotedString, _represent_quoted_string)
+
+
 def load_redirects_config(path: Path) -> dict[str, list[dict[str, str]]]:
     if not path.exists():
         return {}
@@ -89,6 +106,16 @@ def save_redirects_config(
     path: Path, redirects: dict[str, list[dict[str, str]]]
 ) -> dict[str, list[dict[str, str]]]:
     normalized = normalize_redirects_config(serialize_redirects_config(redirects))
+    existing_raw: dict[str, Any] = {}
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            loaded = yaml.safe_load(f) or {}
+        if isinstance(loaded, dict):
+            existing_raw = loaded
+
+    merged = dict(existing_raw)
+    merged["redirects"] = normalized
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with NamedTemporaryFile(
         "w",
@@ -98,12 +125,23 @@ def save_redirects_config(
         suffix=".tmp",
         delete=False,
     ) as tmp:
-        yaml.safe_dump(
-            serialize_redirects_config(normalized),
+        yaml.dump(
+            _quote_all_strings(merged),
             tmp,
+            Dumper=_RedirectConfigDumper,
             sort_keys=False,
             default_flow_style=False,
         )
         tmp_path = Path(tmp.name)
     tmp_path.replace(path)
     return normalized
+
+
+def _quote_all_strings(value: Any) -> Any:
+    if isinstance(value, str):
+        return _QuotedString(value)
+    if isinstance(value, dict):
+        return {key: _quote_all_strings(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_quote_all_strings(item) for item in value]
+    return value

@@ -18,31 +18,7 @@ mqtt:
   username: "watchdog"
   password: "secret"
 
-# Email — optional; enables POP3 polling and SMTP sending
-# Redirect overrides live in a sibling file named /run/config/redirects_config.yaml.
-# That file maps catchall destination addresses to exact local-parts or regex rules
-# that should be sent there within the same destination domain.
-# The web UI also reads and updates that same redirects file over the REST API.
-# email:
-#   host: "mail.example.com"
-#   username: "user@example.com"
-#   password: "secret"
-#   pop3_port: 995                  # SSL/TLS (default)
-#   smtp_port: 587                  # STARTTLS (default)
-#   poll_interval: 60               # seconds between POP3 polls (default)
-#   store_dir: "/var/lib/emails"    # host path mounted via create.sh volume (default)
-#   sent_retention_days: 30         # delete sent/ files older than this many days (0 = keep forever)
-#   catchall:                       # per-domain forward address; omit to disable final sending
-#     example.com: "catchall@example.com"
-#     otherdomain.net: "catchall@otherdomain.net"
-#
-# Folder layout per account:
-#   {store_dir}/{normalized_address}/inbox/       — freshly received from POP3
-#   {store_dir}/{normalized_address}/processing/  — queued for AI spam filtering
-#   {store_dir}/{normalized_address}/processed/   — AI-approved output waiting to be sent
-#   {store_dir}/{normalized_address}/sent/        — forwarded successfully; auto-deleted after sent_retention_days
-# Files are written atomically (.tmp → rename) for stage hand-offs.
-# Messages are deleted from the POP3 server at fetch time.
+# Email is configured separately in /run/config/email_config.yaml.
 
 log_level: info         # default for all logs; overridden per logger below if needed
 log_levels:

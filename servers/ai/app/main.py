@@ -10,6 +10,7 @@ from typing import Optional
 import websockets
 
 from watchdog_email import (
+    dropped_cleaner,
     email_poller,
     inbox_processor,
     processed_sender,
@@ -107,7 +108,7 @@ async def main() -> None:
             web_cfg.host,
             web_cfg.port,
             web_cfg.web_pwd,
-            RedirectConfigStore(config_path.with_name("redirects_config.yaml")),
+            RedirectConfigStore(config_path.with_name("email_config.yaml")),
         ),
     ]
 
@@ -143,6 +144,7 @@ async def main() -> None:
         tasks.append(processing_processor(email_cfg))
         tasks.append(processed_sender(email_cfg))
         tasks.append(sent_cleaner(email_cfg))
+        tasks.append(dropped_cleaner(email_cfg))
         email_log.info(
             "Email enabled — %s (POP3 port %d, SMTP port %d)",
             email_cfg.host,

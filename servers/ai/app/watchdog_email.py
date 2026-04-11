@@ -19,6 +19,7 @@ INBOX_SCAN_INTERVAL = 10
 PROCESSING_SCAN_INTERVAL = 10
 PROCESSED_SCAN_INTERVAL = 10
 SENT_CLEAN_INTERVAL = 3600
+DROPPED_CLEAN_INTERVAL = 3600
 
 
 def _fetch_emails_sync(
@@ -149,10 +150,12 @@ async def processing_processor(cfg: EmailConfig) -> None:
     base_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username)
     processing_dir = base_dir / "processing"
     processed_dir = base_dir / "processed"
+    dropped_dir = base_dir / "dropped"
     domain = cfg.username.split("@")[1] if "@" in cfg.username else ""
     default_catchall_to = cfg.catchall.get(domain, "") if cfg.catchall else ""
     processing_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
+    dropped_dir.mkdir(parents=True, exist_ok=True)
 
     email_log.info(
         "Processing processor started — placeholder AI moving processing/ → processed/ every %ds",
@@ -162,8 +165,8 @@ async def processing_processor(cfg: EmailConfig) -> None:
     while True:
         try:
             redirects = cfg.redirects
-            if cfg.redirects_path:
-                redirects = load_redirects_config(Path(cfg.redirects_path))
+            if cfg.config_path:
+                redirects = load_redirects_config(Path(cfg.config_path))
                 cfg.redirects = redirects
             for eml_path in sorted(processing_dir.glob("*.eml")):
                 processed_path = process_email(
@@ -172,13 +175,17 @@ async def processing_processor(cfg: EmailConfig) -> None:
                     {
                         "catchall_email": default_catchall_to,
                         "redirects": redirects,
+                        "drop_rules": cfg.drop,
+                        "allowed_domains": cfg.allowed_domains,
+                        "dropped_dir": dropped_dir,
                     },
                 )
                 if processed_path is None:
                     continue
                 email_log.info(
-                    "Processing processor: ran subprocessor chain for processing/%s → processed/%s",
+                    "Processing processor: ran subprocessor chain for processing/%s → %s/%s",
                     eml_path.name,
+                    processed_path.parent.name,
                     processed_path.name,
                 )
         except Exception as exc:
@@ -276,6 +283,40 @@ async def sent_cleaner(cfg: EmailConfig) -> None:
         except Exception as exc:
             email_log.warning("Sent cleaner error: %s", exc)
         await asyncio.sleep(SENT_CLEAN_INTERVAL)
+
+
+async def dropped_cleaner(cfg: EmailConfig) -> None:
+    if cfg.dropped_retention_days <= 0:
+        email_log.info("Dropped cleaner: retention disabled (dropped_retention_days=0)")
+        return
+
+    dropped_dir = Path(cfg.store_dir) / normalize_email_path(cfg.username) / "dropped"
+    dropped_dir.mkdir(parents=True, exist_ok=True)
+    email_log.info(
+        "Dropped cleaner started — deleting dropped/ files older than %d days, checking every %ds",
+        cfg.dropped_retention_days,
+        DROPPED_CLEAN_INTERVAL,
+    )
+
+    while True:
+        try:
+            cutoff = (
+                datetime.datetime.now().timestamp() - cfg.dropped_retention_days * 86400
+            )
+            for eml_path in dropped_dir.glob("*.eml"):
+                if eml_path.stat().st_mtime < cutoff:
+                    eml_path.unlink()
+                    metadata_path = metadata_path_for(eml_path)
+                    if metadata_path.exists():
+                        metadata_path.unlink()
+                    email_log.info(
+                        "Dropped cleaner: deleted %s (older than %d days)",
+                        eml_path.name,
+                        cfg.dropped_retention_days,
+                    )
+        except Exception as exc:
+            email_log.warning("Dropped cleaner error: %s", exc)
+        await asyncio.sleep(DROPPED_CLEAN_INTERVAL)
 
 
 def _send_email_sync(cfg: EmailConfig, to: str, subject: str, body: str) -> None:

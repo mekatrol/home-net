@@ -89,12 +89,13 @@ the SSH key, or updating the ping service code.
 
 ## Deploy the monitor container
 
-Place your real config at `./run/config/config.yaml` — see `app/config.example.yaml`
-for the format. Each device entry's `mqtt_topic` must match the topic you
-configured when running `deploy.sh` on that Pi.
+Place your main config at `./run/config/config.yaml` and your mail settings at
+`./run/config/email_config.yaml` — see `app/config.example.yaml` and
+`app/email_config.yaml` for the formats. Each device entry's `mqtt_topic` must
+match the topic you configured when running `deploy.sh` on that Pi.
 
-Secrets such as `watchdog_key` stay under `./run/secrets/`. Redirect settings
-for the web UI live in `./run/config/redirects_config.yaml`.
+Secrets such as `watchdog_key` stay under `./run/secrets/`. Email settings and
+redirect rules for the web UI live together in `./run/config/email_config.yaml`.
 
 ```bash
 SSH_USER_NAME="ssh" SSH_USER_PASSWORD="changeme" HOSTNAME="ai.lan" DNSHOST="9.9.9.9" TIMEZONE="Australia/Sydney" ./create.sh
@@ -102,8 +103,8 @@ SSH_USER_NAME="ssh" SSH_USER_PASSWORD="changeme" HOSTNAME="ai.lan" DNSHOST="9.9.
 
 ## Redirect manager web UI
 
-The monitor now also starts an HTTP web server for managing
-`redirects_config.yaml`.
+The monitor now also starts an HTTP web server for managing the `redirects`
+section inside `email_config.yaml`.
 
 - Default URL: `http://<container-ip>:8080/`
 - Auth: enter `web.web_pwd` from `config.yaml`
