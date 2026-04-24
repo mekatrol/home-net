@@ -20,6 +20,7 @@ PROCESSING_SCAN_INTERVAL = 10
 PROCESSED_SCAN_INTERVAL = 10
 SENT_CLEAN_INTERVAL = 3600
 DROPPED_CLEAN_INTERVAL = 3600
+ORPHANED_METADATA_CLEAN_INTERVAL = 3600
 RECIPIENT_HEADERS = ("To", "Cc", "Bcc")
 RESUME_FROM_DROPPED_KEY = "resume_from_dropped"
 
@@ -134,6 +135,36 @@ def delete_email_with_metadata(eml_path: Path) -> bool:
     if metadata_path.exists():
         metadata_path.unlink()
     return True
+
+
+def cleanup_orphaned_email_metadata(root_dir: Path) -> int:
+    """Delete .eml metadata sidecars when their email file is gone."""
+    deleted_count = 0
+    if not root_dir.exists():
+        return deleted_count
+
+    for metadata_path in root_dir.rglob("*.eml.meta.json"):
+        email_path = metadata_path.with_name(
+            metadata_path.name[: -len(".meta.json")]
+        )
+        if email_path.exists():
+            continue
+        try:
+            metadata_path.unlink()
+            deleted_count += 1
+            email_log.info(
+                "Metadata cleaner: deleted orphaned metadata %s",
+                metadata_path.relative_to(root_dir),
+            )
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            email_log.warning(
+                "Metadata cleaner: failed to delete %s: %s",
+                metadata_path,
+                exc,
+            )
+    return deleted_count
 
 
 def _read_email_metadata(eml_path: Path) -> dict[str, object]:
@@ -500,6 +531,29 @@ async def dropped_cleaner(cfg: EmailConfig) -> None:
         except Exception as exc:
             email_log.warning("Dropped cleaner error: %s", exc)
         await asyncio.sleep(DROPPED_CLEAN_INTERVAL)
+
+
+async def orphaned_metadata_cleaner(cfg: EmailConfig) -> None:
+    store_dir = Path(cfg.store_dir)
+    store_dir.mkdir(parents=True, exist_ok=True)
+    email_log.info(
+        "Metadata cleaner started — deleting orphaned .eml.meta.json files under %s every %ds",
+        store_dir,
+        ORPHANED_METADATA_CLEAN_INTERVAL,
+    )
+
+    while True:
+        try:
+            deleted_count = cleanup_orphaned_email_metadata(store_dir)
+            if deleted_count:
+                email_log.info(
+                    "Metadata cleaner: deleted %d orphaned metadata file%s",
+                    deleted_count,
+                    "" if deleted_count == 1 else "s",
+                )
+        except Exception as exc:
+            email_log.warning("Metadata cleaner error: %s", exc)
+        await asyncio.sleep(ORPHANED_METADATA_CLEAN_INTERVAL)
 
 
 def _send_email_sync(cfg: EmailConfig, to: str, subject: str, body: str) -> None:

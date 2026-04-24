@@ -60,6 +60,7 @@ def process_email(
 
     destination_path = final_destination_dir / source_path.name
     tmp_path = final_destination_dir / f"{source_path.name}.tmp"
+    source_metadata_path = metadata_path_for(source_path)
     metadata_path = metadata_path_for(destination_path)
     tmp_metadata_path = metadata_path_for(tmp_path)
     try:
@@ -79,6 +80,8 @@ def process_email(
         tmp_metadata_path.rename(metadata_path)
 
         locked_path.unlink()
+        if source_metadata_path != metadata_path and source_metadata_path.exists():
+            source_metadata_path.unlink()
         return destination_path
     except Exception:
         if tmp_path.exists():

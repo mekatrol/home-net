@@ -13,6 +13,7 @@ from watchdog_email import (
     dropped_cleaner,
     email_poller,
     inbox_processor,
+    orphaned_metadata_cleaner,
     processed_sender,
     processing_processor,
     sent_cleaner,
@@ -146,6 +147,7 @@ async def main() -> None:
         tasks.append(processed_sender(email_cfg))
         tasks.append(sent_cleaner(email_cfg))
         tasks.append(dropped_cleaner(email_cfg))
+        tasks.append(orphaned_metadata_cleaner(email_cfg))
         email_log.info(
             "Email enabled — %s (POP3 port %d, SMTP port %d)",
             email_cfg.host,
