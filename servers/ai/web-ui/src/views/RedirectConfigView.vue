@@ -57,6 +57,13 @@ onMounted(() => {
       <div class="rules">
         <div v-for="(rule, ruleIndex) in redirect.rules" :key="ruleIndex" class="rule-row">
           <label class="field compact">
+            <span>Direction</span>
+            <select v-model="rule.direction">
+              <option value="to">To</option>
+              <option value="from">From</option>
+            </select>
+          </label>
+          <label class="field compact">
             <span>Type</span>
             <select v-model="rule.type">
               <option value="exact">Exact</option>

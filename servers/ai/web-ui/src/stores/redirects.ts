@@ -2,9 +2,11 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 export type RedirectRuleType = 'exact' | 'regex'
+export type RedirectRuleDirection = 'from' | 'to'
 
 export interface RedirectRule {
   type: RedirectRuleType
+  direction: RedirectRuleDirection
   value: string
 }
 
@@ -48,6 +50,7 @@ function apiUrl(path: string): string {
 function createEmptyRule(): RedirectRule {
   return {
     type: 'exact',
+    direction: 'to',
     value: '',
   }
 }
@@ -65,6 +68,7 @@ function cloneRedirectEntry(redirect: RedirectEntry): RedirectEntry {
     rules: Array.isArray(redirect.rules)
       ? redirect.rules.map((rule) => ({
           type: rule.type === 'regex' ? 'regex' : 'exact',
+          direction: rule.direction === 'from' ? 'from' : 'to',
           value: rule.value ?? '',
         }))
       : [],
@@ -194,6 +198,7 @@ export const useRedirectStore = defineStore('redirects', () => {
             catchall_email: redirect.catchall_email.trim(),
             rules: redirect.rules.map((rule) => ({
               type: rule.type,
+              direction: rule.direction,
               value: rule.value.trim(),
             })),
           })),

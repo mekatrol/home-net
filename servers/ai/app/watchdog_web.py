@@ -200,7 +200,10 @@ async def api_continue_dropped_emails(request: web.Request) -> web.Response:
 
 
 async def serve_index(_: web.Request) -> web.FileResponse:
-    return web.FileResponse(Path(__file__).parent / "web" / "index.html")
+    return web.FileResponse(
+        Path(__file__).parent / "web" / "index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 @web.middleware
@@ -261,8 +264,13 @@ def _normalize_redirects_payload(
             if not isinstance(rule, dict):
                 continue
             rule_type = str(rule.get("type", "")).strip().lower()
+            direction = str(rule.get("direction", "to")).strip().lower()
             value = str(rule.get("value", "")).strip()
-            if rule_type not in {"exact", "regex"} or not value:
+            if (
+                rule_type not in {"exact", "regex"}
+                or direction not in {"from", "to"}
+                or not value
+            ):
                 continue
             if rule_type == "regex":
                 try:
@@ -271,7 +279,7 @@ def _normalize_redirects_payload(
                     raise web.HTTPBadRequest(
                         reason=f"Invalid regex for {catchall_email}: {value} ({exc})"
                     ) from exc
-            rules.append({"type": rule_type, "value": value})
+            rules.append({"type": rule_type, "direction": direction, "value": value})
         normalized_input[catchall_email] = rules
     return normalize_redirects_config({"redirects": normalized_input})
 

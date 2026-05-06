@@ -114,7 +114,8 @@ section inside `email_config.yaml`.
 
 The UI writes back to the same mounted config file used by the email
 processing pipeline, so redirect changes apply without rebuilding the
-container.
+container. Redirect rules can match either the message `To` address or the
+`From` address. Legacy rules without a direction are treated as `To`.
 
 ---
 

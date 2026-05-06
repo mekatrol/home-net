@@ -6,6 +6,9 @@ from typing import Any
 
 import yaml
 
+REDIRECT_DIRECTIONS = {"from", "to"}
+REDIRECT_TYPES = {"exact", "regex"}
+
 
 class _QuotedString(str):
     pass
@@ -53,12 +56,16 @@ def normalize_redirects_config(raw: Any) -> dict[str, list[dict[str, str]]]:
                 if value.lower().startswith("regex:"):
                     pattern = value[6:].strip()
                     if pattern:
-                        normalized_rules.append({"type": "regex", "value": pattern})
+                        normalized_rules.append(
+                            {"type": "regex", "direction": "to", "value": pattern}
+                        )
                     continue
                 address = value.lower()
                 if "@" not in address:
                     address = f"{address}@{domain}"
-                normalized_rules.append({"type": "exact", "value": address})
+                normalized_rules.append(
+                    {"type": "exact", "direction": "to", "value": address}
+                )
                 continue
 
             if not isinstance(rule, dict):
@@ -66,17 +73,43 @@ def normalize_redirects_config(raw: Any) -> dict[str, list[dict[str, str]]]:
 
             rule_type = rule.get("type")
             rule_value = rule.get("value")
-            if isinstance(rule_type, str) and isinstance(rule_value, str) and rule_value.strip():
+            if (
+                isinstance(rule_type, str)
+                and isinstance(rule_value, str)
+                and rule_value.strip()
+            ):
                 normalized_type = rule_type.strip().lower()
+                if normalized_type not in REDIRECT_TYPES:
+                    normalized_type = ""
+                raw_direction = rule.get("direction", rule.get("Direction", "to"))
+                normalized_direction = (
+                    raw_direction.strip().lower()
+                    if isinstance(raw_direction, str)
+                    else "to"
+                )
+                if normalized_direction not in REDIRECT_DIRECTIONS:
+                    normalized_direction = "to"
                 normalized_value = rule_value.strip()
                 if normalized_type == "exact":
                     address = normalized_value.lower()
                     if "@" not in address:
                         address = f"{address}@{domain}"
-                    normalized_rules.append({"type": "exact", "value": address})
+                    normalized_rules.append(
+                        {
+                            "type": "exact",
+                            "direction": normalized_direction,
+                            "value": address,
+                        }
+                    )
                     continue
                 if normalized_type == "regex":
-                    normalized_rules.append({"type": "regex", "value": normalized_value})
+                    normalized_rules.append(
+                        {
+                            "type": "regex",
+                            "direction": normalized_direction,
+                            "value": normalized_value,
+                        }
+                    )
                     continue
 
             exact_value = rule.get("exact") or rule.get("address")
@@ -84,12 +117,14 @@ def normalize_redirects_config(raw: Any) -> dict[str, list[dict[str, str]]]:
                 address = exact_value.strip().lower()
                 if "@" not in address:
                     address = f"{address}@{domain}"
-                normalized_rules.append({"type": "exact", "value": address})
+                normalized_rules.append(
+                    {"type": "exact", "direction": "to", "value": address}
+                )
 
             regex_value = rule.get("regex")
             if isinstance(regex_value, str) and regex_value.strip():
                 normalized_rules.append(
-                    {"type": "regex", "value": regex_value.strip()}
+                    {"type": "regex", "direction": "to", "value": regex_value.strip()}
                 )
 
         normalized[catchall_email] = normalized_rules

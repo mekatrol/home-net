@@ -35,5 +35,8 @@
 #     - "accounts@example.com"
 #     - "invoices@example.com"
 #     - "regex:^invoice-.*$"
+#     - type: "exact"
+#       direction: "from"
+#       value: "supplier@example.net"
 #   "support@example.com":
 #     - "helpdesk@example.com"
