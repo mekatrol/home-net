@@ -202,18 +202,44 @@ sudo service postfix start
 sudo tail -n 100 /var/log/mail.log
 ```
 
-### Accept relaying from internal on-premises server
+### Accept relaying from internal on-premises server, reject invalid senders from own domains
 
 In /etc/postfix/main.cf add internal on-premises server IP to end of mynetworks 
 
 ```bash
 sudo nano /etc/postfix/main.cf
+```
 
+```ini
 mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128 **ADD HERE**
 
 # e.g.
 
 mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128 58.165.151.139/32
+```
+
+Dont allow external senders from MTA managed domains unless authenticated.
+```ini
+smtpd_sender_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    check_sender_access hash:/etc/postfix/reject_own_sender_domains,
+    reject_unknown_sender_domain
+```
+
+```bash
+sudo nano /etc/postfix/reject_own_sender_domains
+```
+
+```ini
+test.com REJECT External hosts may not send using test.com as sender
+.test.com REJECT External hosts may not send using test.com as sender
+test.com.au REJECT External hosts may not send using test.com.au as sender
+.test.com.au REJECT External hosts may not send using test.com.au as sender
+```
+
+```bash
+sudo postmap /etc/postfix/reject_own_sender_domains
 ```
 
 In /etc/postfix/main.cf remove the blank entry (two consecutive commas without a value) 
@@ -222,6 +248,10 @@ In /etc/postfix/main.cf remove the blank entry (two consecutive commas without a
 sudo nano /etc/postfix/main.cf
 
 mydestination = $myhostname, smtp.<domain>.com, localhost.<domain>.com, , localhost
+```
+
+```bash
+sudo postfix reload
 ```
 
 ### Accept all users for configured domains and forward to upstream server for those domains
