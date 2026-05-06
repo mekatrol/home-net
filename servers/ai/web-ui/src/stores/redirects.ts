@@ -6,7 +6,7 @@ export type RedirectRuleDirection = 'from' | 'to'
 
 export interface RedirectRule {
   type: RedirectRuleType
-  direction: RedirectRuleDirection
+  direction?: RedirectRuleDirection
   value: string
 }
 
@@ -68,7 +68,8 @@ function cloneRedirectEntry(redirect: RedirectEntry): RedirectEntry {
     rules: Array.isArray(redirect.rules)
       ? redirect.rules.map((rule) => ({
           type: rule.type === 'regex' ? 'regex' : 'exact',
-          direction: rule.direction === 'from' ? 'from' : 'to',
+          direction:
+            rule.direction === 'from' || rule.direction === 'to' ? rule.direction : undefined,
           value: rule.value ?? '',
         }))
       : [],
@@ -198,7 +199,7 @@ export const useRedirectStore = defineStore('redirects', () => {
             catchall_email: redirect.catchall_email.trim(),
             rules: redirect.rules.map((rule) => ({
               type: rule.type,
-              direction: rule.direction,
+              ...(rule.direction ? { direction: rule.direction } : {}),
               value: rule.value.trim(),
             })),
           })),

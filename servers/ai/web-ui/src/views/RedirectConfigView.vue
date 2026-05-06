@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { useRedirectStore } from '@/stores/redirects'
+import type { RedirectRule, RedirectRuleDirection } from '@/stores/redirects'
 
 const redirectStore = useRedirectStore()
 
@@ -14,6 +15,17 @@ const { addRedirect, addRule, loadRedirects, removeRedirect, removeRule, saveRed
 onMounted(() => {
   void loadRedirects()
 })
+
+function displayRuleDirection(rule: RedirectRule): RedirectRuleDirection {
+  return rule.direction ?? 'to'
+}
+
+function updateRuleDirection(rule: RedirectRule, event: Event): void {
+  const value = (event.target as HTMLSelectElement).value
+  if (value === 'from' || value === 'to') {
+    rule.direction = value
+  }
+}
 </script>
 
 <template>
@@ -45,11 +57,7 @@ onMounted(() => {
       <div class="redirect-header">
         <label class="field grow">
           <span>Catchall destination</span>
-          <input
-            v-model="redirect.catchall_email"
-            type="email"
-            placeholder="finance@example.com"
-          >
+          <input v-model="redirect.catchall_email" type="email" placeholder="finance@example.com" />
         </label>
         <button class="danger" @click="removeRedirect(redirectIndex)">Delete</button>
       </div>
@@ -58,7 +66,7 @@ onMounted(() => {
         <div v-for="(rule, ruleIndex) in redirect.rules" :key="ruleIndex" class="rule-row">
           <label class="field compact">
             <span>Direction</span>
-            <select v-model="rule.direction">
+            <select :value="displayRuleDirection(rule)" @change="updateRuleDirection(rule, $event)">
               <option value="to">To</option>
               <option value="from">From</option>
             </select>
@@ -76,7 +84,7 @@ onMounted(() => {
               v-model="rule.value"
               type="text"
               :placeholder="rule.type === 'regex' ? '^invoice-.*$' : 'accounts'"
-            >
+            />
           </label>
           <button class="ghost" @click="removeRule(redirectIndex, ruleIndex)">Remove</button>
         </div>
