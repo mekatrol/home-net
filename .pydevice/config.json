@@ -1,0 +1,15 @@
+{
+  "meta": {
+    "version": 1,
+    "help": "See: https://github.com/mekatrol/micropython-filemanager/blob/main/pydevice-extension/pydevice/README.md for description of configuration values."
+  },
+  "devices": {
+    "806599eb8d8c": {
+      "hostFolder": "devices/mqtt-switch",
+      "name": "LEGO Train",
+      "syncExcludedPaths": [
+        "config.py"
+      ]
+    }
+  }
+}
