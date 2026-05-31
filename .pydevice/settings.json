@@ -4,7 +4,9 @@
   "reconnectDevicePaths": [
     "/dev/ttyACM0"
   ],
-  "replHistoryByDevice": {},
+  "replHistoryByDevice": {
+    "806599eb8d8c": []
+  },
   "serialPortOperationTimeoutMs": 3000,
   "serialPortAggressiveRecoveryProbeTimeoutMs": 9000,
   "pythonProbeRuntimeInfoTimeoutMs": 2500,
