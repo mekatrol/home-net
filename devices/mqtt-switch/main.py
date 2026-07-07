@@ -1,4 +1,5 @@
 from machine import Pin, reset
+from neopixel import NeoPixel
 
 try:
     import utime as time
@@ -25,7 +26,7 @@ except ImportError:
 
 
 DEFAULT_OUTPUT_PIN = 5
-DEFAULT_STATUS_LED_PIN = 15
+DEFAULT_STATUS_LED_PIN = 16
 OUTPUT_INTERVAL_SECONDS = 0.1
 STARTUP_FLASH_INTERVAL_SECONDS = 0.2
 MQTT_INACTIVE_FLASH_HZ = 2
@@ -58,6 +59,7 @@ def build_status_led():
 
 output_pin = build_output_pin()
 status_led = build_status_led()
+pixel = NeoPixel(status_led, 1)
 
 
 def get_int_config(name, default, minimum=1):
@@ -176,16 +178,24 @@ async def output_control():
             now_ms = ticks_ms()
 
             if is_mqtt_rx_indicator_active(now_ms):
-                status_led.value(True)
+                pixel[0] = (0, 1, 0)
+                pixel.write()                
             elif is_mqtt_inactivity_warning_active(now_ms):
                 # A blink cycle has two phases: ON then OFF.
                 # For 2 Hz, each full cycle lasts 500 ms, so each phase lasts 250 ms.
                 # Integer-dividing the current time by the phase length gives a phase number
                 # that increments every 250 ms; even phases turn the LED on, odd phases turn it off.
                 flash_phase_ms = 1000 // (MQTT_INACTIVE_FLASH_HZ * 2)
-                status_led.value((now_ms // flash_phase_ms) % 2 == 0)
+                flash_on = (now_ms // flash_phase_ms) % 2 == 0
+                if flash_on:
+                    pixel[0] = (0, 1, 0)
+                else:
+                    pixel[0] = (0, 0, 0)
+                pixel.write()                
+                
             else:
-                status_led.value(False)
+                pixel[0] = (0, 0, 0)
+                pixel.write()                
 
             output_pin.value(enabled_on and op_on)
             await asyncio.sleep(OUTPUT_INTERVAL_SECONDS)
@@ -194,11 +204,13 @@ async def output_control():
             await asyncio.sleep(1)
 
 
-async def flash_output(times=2):
+async def flash_output(times=2, r=0, g=1, b=0):
     for _ in range(times):
-        status_led.value(True)
+        pixel[0] = (r, g, b)
+        pixel.write()                
         await asyncio.sleep(STARTUP_FLASH_INTERVAL_SECONDS)
-        status_led.value(False)
+        pixel[0] = (0, 0, 0)
+        pixel.write()                
         await asyncio.sleep(STARTUP_FLASH_INTERVAL_SECONDS)
 
 

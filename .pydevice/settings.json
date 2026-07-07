@@ -2,10 +2,12 @@
   "autoReconnectDevices": false,
   "loggerAutoStart": true,
   "reconnectDevicePaths": [
+    "/dev/ttyACM1",
     "/dev/ttyACM0"
   ],
   "replHistoryByDevice": {
-    "806599eb8d8c": []
+    "806599eb8d8c": [],
+    "e6625887d352a034": []
   },
   "serialPortOperationTimeoutMs": 3000,
   "serialPortAggressiveRecoveryProbeTimeoutMs": 9000,

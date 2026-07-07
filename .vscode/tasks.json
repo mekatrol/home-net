@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "MQTT Switch C: Set target",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}/devices/mqtt-switch-c",
+        "set-target"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "MQTT Switch C: Build",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}/devices/mqtt-switch-c",
+        "build"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "MQTT Switch C: Flash",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}/devices/mqtt-switch-c",
+        "flash",
+        "${input:serialPort}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "MQTT Switch C: Monitor",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}/devices/mqtt-switch-c",
+        "monitor",
+        "${input:serialPort}"
+      ],
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "MQTT Switch C: Flash and Monitor",
+      "dependsOrder": "sequence",
+      "dependsOn": ["MQTT Switch C: Flash", "MQTT Switch C: Monitor"],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "serialPort",
+      "type": "promptString",
+      "description": "ESP32-S2 serial port",
+      "default": "/dev/ttyACM0"
+    }
+  ]
+}

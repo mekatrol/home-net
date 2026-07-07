@@ -10,6 +10,20 @@
       "syncExcludedPaths": [
         "config.py"
       ]
+    },
+    "e6625887d352a034": {
+      "hostFolder": "devices/mqtt-switch",
+      "name": "Test Device",
+      "syncExcludedPaths": [
+        "config.py"
+      ]
+    },
+    "e6614104033f792a": {
+      "name": "rp2040_temp_hum"
+    },
+    "e6625887d372b736": {
+      "hostFolder": "devices/bike-led",
+      "name": "bike-led"
     }
   }
 }

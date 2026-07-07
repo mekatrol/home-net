@@ -1,0 +1,63 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Set target",
+      "type": "shell",
+      "command": "${workspaceFolder}/../../scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}",
+        "set-target"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "${workspaceFolder}/../../scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}",
+        "build"
+      ],
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash",
+      "type": "shell",
+      "command": "${workspaceFolder}/../../scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}",
+        "flash",
+        "${input:serialPort}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Monitor",
+      "type": "shell",
+      "command": "${workspaceFolder}/../../scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}",
+        "monitor",
+        "${input:serialPort}"
+      ],
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "Flash and Monitor",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Flash", "Monitor"],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "serialPort",
+      "type": "promptString",
+      "description": "ESP32-S2 serial port",
+      "default": "/dev/ttyACM0"
+    }
+  ]
+}
