@@ -24,15 +24,18 @@ placeholder defaults.
 The checked-in `.vscode/tasks.json` also exposes terminal tasks:
 
 - `Set target`
+- `Clean`
 - `Build`
 - `Flash`
 - `Monitor`
 - `Flash and Monitor`
+- `Clean, Build, and Flash`
 
 Those terminal tasks are portable and do not commit local ESP-IDF installation
 paths. They run through `scripts/esp-idf-task.sh`, which uses `idf.py` if it is
 already on `PATH`, or sources ESP-IDF from `ESP_IDF_EXPORT_SH`, `IDF_PATH`, or
-common install locations under `$HOME`.
+common install locations under `$HOME`. `Flash` builds before flashing, so
+`Clean, Build, and Flash` runs `Clean` and then `Flash`.
 
 Use the checked-in `Flash` or `Flash and Monitor` task for normal flashing. The
 ESP-IDF extension's built-in flash command may still print esptool deprecation

@@ -170,12 +170,30 @@ static void keepalive_status_task(void *arg)
 {
     mqtt_switch_state_t *state = mqtt_switch_state();
 
+    /*
+     * This task periodically republishes the current switch state while the
+     * MQTT client is connected. Commands publish an immediate status update,
+     * but the keepalive publish gives the broker and subscribers a fresh copy
+     * even if a retained message was missed, a subscriber restarted, or no
+     * control traffic has arrived for a while.
+     */
     while (true) {
+        /*
+         * The ESP MQTT client owns reconnect behavior. This task only checks
+         * the shared connection bit before publishing so it does not queue
+         * status messages while disconnected or before the first successful
+         * session has subscribed to the command topic.
+         */
         EventBits_t bits = xEventGroupGetBits(state->connection_event_group);
         if (bits & MQTT_SWITCH_MQTT_CONNECTED_BIT) {
             mqtt_switch_mqtt_publish_status();
         }
 
+        /*
+         * The 30 second interval is deliberately much longer than the command
+         * response path. It is a liveness/status refresh, not the mechanism
+         * that makes output changes visible.
+         */
         vTaskDelay(pdMS_TO_TICKS(MQTT_KEEPALIVE_STATUS_PERIOD_MS));
     }
 }
@@ -184,22 +202,49 @@ static void mqtt_inactivity_watchdog_task(void *arg)
 {
     mqtt_switch_state_t *state = mqtt_switch_state();
 
+    /*
+     * This task is a last-resort recovery path for a device that has stopped
+     * receiving MQTT traffic. Wi-Fi and the MQTT client both have their own
+     * reconnect handling, but if the device remains silent past the configured
+     * timeout, restarting the chip returns it to the normal boot and connect
+     * sequence without requiring physical access.
+     */
     while (true) {
+        /*
+         * A zero timestamp means MQTT has not connected or delivered any data
+         * yet, so there is no valid inactivity window to measure. Once a
+         * connect or data event sets last_mqtt_rx_ms, the watchdog starts
+         * comparing wall-clock uptime against the last known broker contact.
+         */
         if (state->last_mqtt_rx_ms > 0) {
             int64_t idle_ms = mqtt_switch_now_ms() - state->last_mqtt_rx_ms;
             if (idle_ms > CONFIG_MQTT_SWITCH_MQTT_INACTIVITY_TIMEOUT_SECONDS * 1000LL) {
+                /*
+                 * Log first and delay briefly so the error has a chance to
+                 * flush over serial before esp_restart() resets the CPU.
+                 */
                 ESP_LOGE(TAG, "MQTT inactivity timeout, restarting");
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 esp_restart();
             }
         }
 
+        /*
+         * Checking once per second keeps timeout detection close to the
+         * configured value while avoiding a tight polling loop. The output task
+         * handles the user-visible inactivity LED pattern separately.
+         */
         vTaskDelay(pdMS_TO_TICKS(MQTT_INACTIVITY_CHECK_MS));
     }
 }
 
 void mqtt_switch_mqtt_start_tasks(void)
 {
+    /*
+     * These tasks are background MQTT health tasks. They run below the output
+     * control task because publishing status and watching for inactivity should
+     * not delay applying the local GPIO state derived from the latest command.
+     */
     xTaskCreate(keepalive_status_task, "keepalive_status", 4096, NULL, 4, NULL);
     xTaskCreate(mqtt_inactivity_watchdog_task, "mqtt_watchdog", 4096, NULL, 4, NULL);
 }

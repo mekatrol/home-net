@@ -12,6 +12,16 @@
       "problemMatcher": []
     },
     {
+      "label": "Clean",
+      "type": "shell",
+      "command": "${workspaceFolder}/../../scripts/esp-idf-task.sh",
+      "args": [
+        "${workspaceFolder}",
+        "clean"
+      ],
+      "problemMatcher": []
+    },
+    {
       "label": "Build",
       "type": "shell",
       "command": "${workspaceFolder}/../../scripts/esp-idf-task.sh",
@@ -49,6 +59,12 @@
       "label": "Flash and Monitor",
       "dependsOrder": "sequence",
       "dependsOn": ["Flash", "Monitor"],
+      "problemMatcher": []
+    },
+    {
+      "label": "Clean, Build, and Flash",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Clean", "Flash"],
       "problemMatcher": []
     }
   ],

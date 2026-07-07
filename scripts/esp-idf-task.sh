@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 2 ]; then
-  echo "usage: $0 <project-dir> <set-target|build|flash|monitor|flash-monitor> [serial-port]" >&2
+  echo "usage: $0 <project-dir> <set-target|clean|build|flash|monitor|flash-monitor> [serial-port]" >&2
   exit 2
 fi
 
@@ -144,6 +144,9 @@ cd "$project_dir"
 case "$action" in
   set-target)
     run_idf set-target esp32s2
+    ;;
+  clean)
+    run_idf fullclean
     ;;
   build)
     run_idf build
