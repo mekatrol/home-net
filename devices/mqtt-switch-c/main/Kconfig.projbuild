@@ -69,7 +69,7 @@ menu "MQTT switch"
 
     config MQTT_SWITCH_STATUS_LED_ACTIVE_LEVEL
         int "Status LED active GPIO level"
-        default 0
+        default 1
         range 0 1
         help
             GPIO level that turns the status LED on. Use 0 for active-low LEDs
