@@ -64,7 +64,16 @@ menu "MQTT switch"
         default 15
         range 0 46
         help
-            Wemos ESP32-S2 Mini boards expose the onboard addressable RGB LED on GPIO15.
+            Wemos ESP32-S2 Mini boards expose the onboard single-color status
+            LED on GPIO15.
+
+    config MQTT_SWITCH_STATUS_LED_ACTIVE_LEVEL
+        int "Status LED active GPIO level"
+        default 0
+        range 0 1
+        help
+            GPIO level that turns the status LED on. Use 0 for active-low LEDs
+            that turn on when the GPIO sinks current, or 1 for active-high LEDs.
 
     config MQTT_SWITCH_MQTT_INACTIVITY_TIMEOUT_SECONDS
         int "MQTT inactivity reset timeout seconds"

@@ -28,7 +28,7 @@ static void output_control_task(void *arg)
             current_ms - state->last_mqtt_rx_ms >= CONFIG_MQTT_SWITCH_MQTT_INACTIVITY_WARNING_SECONDS * 1000LL;
 
         if (rx_indicator_active) {
-            mqtt_switch_status_led_set(0, 1, 0);
+            mqtt_switch_status_led_set(true);
         } else if (inactivity_warning_active) {
             /*
              * A 2 Hz blink has a 500 ms full cycle: 250 ms on, 250 ms off.
@@ -37,9 +37,9 @@ static void output_control_task(void *arg)
              */
             int flash_phase_ms = 1000 / (MQTT_INACTIVE_FLASH_HZ * 2);
             bool flash_on = ((current_ms / flash_phase_ms) % 2) == 0;
-            mqtt_switch_status_led_set(0, flash_on ? 1 : 0, 0);
+            mqtt_switch_status_led_set(flash_on);
         } else {
-            mqtt_switch_status_led_set(0, 0, 0);
+            mqtt_switch_status_led_set(false);
         }
 
         gpio_set_level(CONFIG_MQTT_SWITCH_OUTPUT_GPIO, state->output_enabled && state->output_on);

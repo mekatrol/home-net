@@ -9,7 +9,6 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         esp_driver_gpio
-        esp_driver_rmt
         esp_event
         esp_netif
         esp_wifi

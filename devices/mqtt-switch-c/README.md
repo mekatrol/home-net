@@ -58,6 +58,6 @@ at the serial connection stage.
 - Accepts JSON payloads such as `{"enabled": true, "on": true}`.
 - Drives the configured output GPIO when both `enabled` and `on` are true.
 - Publishes status JSON to the configured status topic.
-- Shows recent MQTT traffic on the onboard RGB LED.
-- Blinks the RGB LED after the MQTT inactivity warning window.
+- Shows recent MQTT traffic on the onboard status LED.
+- Blinks the status LED after the MQTT inactivity warning window.
 - Restarts the device after the MQTT inactivity timeout.
