@@ -1,2 +1,3 @@
 __pycache__/
 device-mirror/
+devices/led-sequence-server/src/LedSequence.Api/wwwroot/*

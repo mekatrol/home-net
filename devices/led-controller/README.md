@@ -27,7 +27,7 @@ The supplied board is configured for:
 - Core 0 runs ESP-IDF's Wi-Fi driver and the HTTP server.
 - Core 1 runs the LED pattern task.
 - After DHCP assigns an address, a separate FreeRTOS task requests
-  `http://led-sequence.lan/<controller-ip-address>`. Network I/O and JSON
+  `http://led-sequence.lan:5050/<controller-ip-address>`. Network I/O and JSON
   parsing therefore do not block the Wi-Fi event loop or LED playback.
 - Four Remote Control Transceiver (RMT) transmit channels generate the four
   external LED waveforms in hardware after each frame is queued.
@@ -46,7 +46,7 @@ The controller performs this request once after its first successful Wi-Fi
 connection:
 
 ```text
-GET http://led-sequence.lan/<controller-ip-address>
+GET http://led-sequence.lan:5050/<controller-ip-address>
 Accept: application/json
 ```
 

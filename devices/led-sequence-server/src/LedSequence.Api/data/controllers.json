@@ -1,0 +1,22 @@
+{
+  "10.2.2.80": {
+    "onboard": {
+      "sequenceIntervalMs": 250,
+      "format": "rgb",
+      "ledCount": 1,
+      "frames": [
+        { "fill": "#ff80ff" },
+        { "fill": "#00ff80" }
+      ]
+    },
+    "string1": {
+      "sequenceIntervalMs": 1000,
+      "format": "grb",
+      "ledCount": 16,
+      "frames": [
+        { "fill": "#00b4ff" },
+        { "fill": "#5000ff" }
+      ]
+    }
+  }
+}

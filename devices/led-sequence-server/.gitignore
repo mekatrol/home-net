@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
+src/LedSequence.Web/vite.config.js
+src/LedSequence.Web/vite.config.d.ts
+src/LedSequence.Web/src/*.js
+.vs/
+.vscode/

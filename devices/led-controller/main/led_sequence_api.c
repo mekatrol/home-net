@@ -14,6 +14,7 @@
 #include "mbedtls/base64.h"
 
 #define SEQUENCE_API_HOST "led-sequence.lan"
+#define SEQUENCE_API_PORT 5050U
 #define FETCH_TASK_STACK_SIZE 8192
 #define FETCH_TASK_PRIORITY 4
 #define MAXIMUM_HTTP_RESPONSE_BYTES (1024 * 1024)
@@ -222,7 +223,7 @@ static void fetch_task(void *task_parameter)
 {
     char *controller_ip_address = task_parameter;
     char url[96];
-    snprintf(url, sizeof(url), "http://%s/%s", SEQUENCE_API_HOST, controller_ip_address);
+    snprintf(url, sizeof(url), "http://%s:%u/%s", SEQUENCE_API_HOST, SEQUENCE_API_PORT, controller_ip_address);
     free(controller_ip_address);
 
     response_buffer_t response = {0};
