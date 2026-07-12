@@ -5,6 +5,7 @@
   "idf.port": "/dev/ttyACM0",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
-  ]
+  ],
+  "idf.currentSetup": "/home/dad/.espressif/v6.0.2/esp-idf"
 }
 

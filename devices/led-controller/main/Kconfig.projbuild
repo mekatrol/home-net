@@ -1,0 +1,50 @@
+menu "LED controller"
+
+    config LED_CONTROLLER_WIFI_SSID
+        string "Wi-Fi SSID"
+        default ""
+        help
+            Configure this with menuconfig. sdkconfig is ignored, so the real
+            network name is not committed to source control.
+
+    config LED_CONTROLLER_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+            Configure this with menuconfig. sdkconfig is ignored, so the real
+            network password is not committed to source control.
+
+    config LED_CONTROLLER_STRING_1_GPIO
+        int "String 1 GPIO"
+        default 4
+        range 0 46
+    config LED_CONTROLLER_STRING_1_LENGTH
+        int "String 1 LED count"
+        default 30
+        range 1 2048
+    config LED_CONTROLLER_STRING_2_GPIO
+        int "String 2 GPIO"
+        default 5
+        range 0 46
+    config LED_CONTROLLER_STRING_2_LENGTH
+        int "String 2 LED count"
+        default 60
+        range 1 2048
+    config LED_CONTROLLER_STRING_3_GPIO
+        int "String 3 GPIO"
+        default 6
+        range 0 46
+    config LED_CONTROLLER_STRING_3_LENGTH
+        int "String 3 LED count"
+        default 90
+        range 1 2048
+    config LED_CONTROLLER_STRING_4_GPIO
+        int "String 4 GPIO"
+        default 7
+        range 0 46
+    config LED_CONTROLLER_STRING_4_LENGTH
+        int "String 4 LED count"
+        default 120
+        range 1 2048
+
+endmenu
