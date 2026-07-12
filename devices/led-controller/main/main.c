@@ -3,7 +3,6 @@
 #include "nvs_flash.h"
 
 #include "led_controller.h"
-#include "led_sequence_api.h"
 #include "web_server.h"
 #include "wifi_station.h"
 
@@ -11,8 +10,8 @@ static const char *TAG = "led-controller-main";
 
 static esp_err_t start_network_services(const char *controller_ip_address)
 {
-    ESP_RETURN_ON_ERROR(web_server_start(), TAG, "Could not start diagnostic web server");
-    return led_sequence_api_fetch(controller_ip_address);
+    (void)controller_ip_address;
+    return web_server_start();
 }
 
 static void initialize_nonvolatile_storage(void)
@@ -30,18 +29,17 @@ void app_main(void)
 {
     initialize_nonvolatile_storage();
 
-    // The LED task is explicitly pinned to core 1. RMT (Remote Control
-    // Transceiver) generates each addressable-LED waveform in hardware after
-    // the task queues a frame, so pattern calculation cannot disturb timing.
+    // RMT (Remote Control Transceiver) generates each addressable-LED waveform
+    // in hardware after the controller queues a solid-colour frame.
     ESP_ERROR_CHECK(led_controller_start());
 
     // ESP-IDF pins its Wi-Fi driver to core 0 for this target. The HTTP server
-    // is also pinned there by web_server_start(), keeping network work away
-    // from pattern calculation on core 1.
+    // is also pinned there. Wi-Fi is needed only for the controller's own web
+    // interface; no server connection is made.
     const esp_err_t wifi_start_result = led_controller_wifi_start(start_network_services);
     if (wifi_start_result != ESP_OK) {
-        // Keep the LED task alive when network configuration is missing. This
-        // makes the configuration error readable in the serial monitor instead
+        // Keep the controller running when network configuration is missing.
+        // This makes the configuration error readable in the serial monitor instead
         // of repeatedly rebooting before the user can diagnose it.
         ESP_LOGE(TAG, "Wi-Fi did not start: %s", esp_err_to_name(wifi_start_result));
     }

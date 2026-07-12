@@ -18,10 +18,10 @@
     "string1": {
       "sequenceIntervalMs": 1000,
       "format": "grb",
-      "ledCount": 119,
+      "ledCount": 60,
       "frames": [
         {
-          "fill": "#c8ff00",
+          "fill": "#04ff00",
           "pixels": null
         }
       ]

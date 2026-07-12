@@ -1,9 +1,10 @@
 # LED Controller
 
 ESP-IDF C project for an ESP32-S3FH4R2 development board. The firmware provides
-a Wi-Fi controller for the onboard WS2812 addressable RGB LED and up to four
-independent external addressable LED strings. LED frames come from the
-`led-sequence.lan` HTTP API.
+a Wi-Fi controller for up to four independent external addressable LED strings.
+Each string's solid colour,
+intensity, physical length, and control length are configured directly through
+the controller's local web interface. No application server is required.
 
 The supplied board is configured for:
 
@@ -24,57 +25,35 @@ The supplied board is configured for:
 
 ## Architecture
 
-- Core 0 runs ESP-IDF's Wi-Fi driver and the HTTP server.
-- Core 1 runs the LED pattern task.
-- After DHCP assigns an address, a separate FreeRTOS task requests
-  `http://led-sequence.lan:5050/<controller-ip-address>`. Network I/O and JSON
-  parsing therefore do not block the Wi-Fi event loop or LED playback.
+- Core 0 runs ESP-IDF's Wi-Fi driver and the controller's HTTP server.
 - Four Remote Control Transceiver (RMT) transmit channels generate the four
-  external LED waveforms in hardware after each frame is queued.
-- The ESP32-S3 only has four RMT transmit channels. The onboard LED therefore
-  uses the SPI peripheral, with each WS2812 bit encoded into three SPI bits.
+  external LED waveforms in hardware whenever a preview is applied or saved
+  settings are restored at startup.
 
-RMT means that neither processor core has to bit-bang timing-sensitive LED
-data. Each returned string has its own frame collection, inferred length,
-channel order, and RMT channel, so strings do not need to have matching lengths
-or sequences. The controller converts the JSON colors to wire-order bytes once
-when the response is applied; playback does no JSON work.
+RMT means that the processor does not have to bit-bang timing-sensitive LED
+data. Each output has its own settings and frame, so strings do not need to have
+matching lengths or colours. External WS2812 pixels use GRB (green, red, blue)
+wire order.
 
-## Sequence API
+## Web settings and preview
 
-The controller performs this request once after its first successful Wi-Fi
-connection:
+After DHCP assigns an address, open that address in a browser. Each of the four
+strings has these settings:
 
-```text
-GET http://led-sequence.lan:5050/<controller-ip-address>
-Accept: application/json
-```
+- **Physical LED string length**: the number of pixels for which the controller
+  sends data, from 0 to 2048.
+- **LED control length**: the number of pixels at the start of the physical
+  string that receive the selected colour. It cannot exceed physical length.
+- **Colour**: the solid RGB colour for controlled pixels.
+- **Intensity**: a 0 to 100 percent brightness scale applied to that colour.
 
-See `sample-api-response.json` for a complete response. The contract is:
-
-- Each `onboard` or `stringN` object has its own positive
-  `sequenceIntervalMs`. Outputs advance independently rather than sharing a
-  global frame rate.
-- `onboard.sequences` contains base64-encoded, wire-order RGB pixels, one pixel
-  per frame. The onboard LED on this board is physically RGB.
-- `string1` through `string4` are optional. A missing property means "do
-  nothing" for that output.
-- `format` is the byte order required by that physical string, for example
-  `grb`, `rgb`, `grbw`, or `rgbw`.
-- `bytesPerLed` must be `3` for an RGB format or `4` for RGBW, and must match
-  the length of `format`.
-- `ledCount` declares the number of addressable pixels on that output.
-- Each `sequences` array contains 0 to 100 base64 strings, one per frame. An empty array
-  means "do nothing". Each decoded frame must contain exactly
-  `ledCount * bytesPerLed` bytes.
-- A malformed string is rejected and logged. That string's existing output is
-  kept; the firmware never installs a partially parsed frame collection.
-
-The base64 data is already arranged in the order named by `format`; the
-controller can therefore give it directly to the Remote Control Transceiver
-(RMT) peripheral after validating its decoded length. Keeping `format` beside
-the compact data makes swapped color channels diagnosable without expanding
-every pixel into JSON properties.
+Changing any field previews the complete string immediately but changes only
+the controller's RAM. Pixels between control length and physical length are
+explicitly sent black, which makes it possible to increase control length until
+the end of an unknown string is found. Click **Save all settings** to commit the
+current settings for all four outputs to NVS (non-volatile storage) flash. On a
+restart, unsaved previews are discarded and the last saved settings are
+restored.
 
 ## Configuration
 
@@ -84,21 +63,15 @@ to set:
 - Wi-Fi SSID and password
 - GPIO for each external LED output (defaults: GPIO 4, 5, 6, and 7)
 
-The firmware cannot connect until the Wi-Fi SSID is set. If it is left empty,
-the serial monitor reports the missing setting and leaves the LED task running
-instead of entering a reboot loop. An empty password is supported for an open
-access point.
+The firmware cannot expose its web interface until the Wi-Fi SSID is set. If it
+is left empty, the serial monitor reports the missing setting without entering
+a reboot loop. An empty password is supported for an open access point.
 
 `sdkconfig` is ignored, so Wi-Fi credentials are not committed. Safe board
 defaults remain checked in as `sdkconfig.defaults`. After flashing, the serial
-log prints the assigned IP address. Open that address in a browser to inspect
-the applied state, temporarily toggle strings, preview the onboard LED colour,
-or restart the controller.
-
-All external strings and the onboard LED start turned off. Valid API fields
-replace that state after Wi-Fi connects. The local web page remains available
-for diagnostics and temporary manual overrides; restarting fetches the API
-configuration again.
+log prints the assigned IP address. Open that address in a browser to preview
+and save the four external string configurations or restart the controller.
+Before settings are saved for the first time, all strings start off.
 
 ## SN74AHCT125N wiring
 

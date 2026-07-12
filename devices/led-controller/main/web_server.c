@@ -1,7 +1,7 @@
 #include "web_server.h"
 
+#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "esp_check.h"
 #include "esp_http_server.h"
@@ -16,14 +16,15 @@
 
 static const char INDEX_HTML[] =
     "<!doctype html><meta name=viewport content='width=device-width'><title>LED controller</title>"
-    "<style>body{font:18px sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem}button,input{font:inherit;margin:.3rem}input[type=number]{width:7rem}section{padding:1rem;border:1px solid #aaa;margin:1rem 0}.status{min-height:1.5em}</style>"
-    "<h1>LED controller</h1><p>Sequences are supplied by led-sequence.lan.</p><section id=strings></section>"
-    "<section><h2>Diagnostics</h2><h3>Onboard LED colour</h3><p><input id=color type=color value=#000000><button type=button onclick=setColor()>Preview colour</button></p><p id=status class=status></p><button type=button onclick=rebootController()>Restart controller</button></section>"
-    "<script>async function refresh(){let s=await(await fetch('/api/state')).json();strings.innerHTML=s.strings.map((x,i)=>`<p>String ${i+1}: ${x.length} LEDs, ${x.pattern} <button onclick=toggle(${i},${!x.enabled})>${x.enabled?'Turn off':'Turn on'}</button></p>`).join('');color.value='#'+[s.onboard.red,s.onboard.green,s.onboard.blue].map(x=>x.toString(16).padStart(2,'0')).join('')}"
-    "async function toggle(i,e){await fetch(`/api/string?index=${i}&enabled=${e?1:0}`,{method:'POST'});refresh()}"
-    "async function setColor(){let v=color.value;let r=await fetch(`/api/onboard?red=${parseInt(v.slice(1,3),16)}&green=${parseInt(v.slice(3,5),16)}&blue=${parseInt(v.slice(5),16)}`,{method:'POST'});status.textContent=r.ok?'Temporary colour applied.':await r.text();if(r.ok)refresh()}"
-    "async function rebootController(){if(!confirm('Restart the LED controller now?'))return;status.textContent='Restarting controller...';let r=await fetch('/api/reboot',{method:'POST'});if(!r.ok){status.textContent=await r.text();return}status.textContent='Restarting. This page will reconnect shortly.';setTimeout(()=>location.reload(),5000)}"
-    "refresh()</script>";
+    "<style>body{font:18px sans-serif;max-width:55rem;margin:2rem auto;padding:0 1rem}button,input{font:inherit;margin:.3rem}input[type=number]{width:6rem}section{padding:1rem;border:1px solid #aaa;margin:1rem 0}.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.5rem}.row label{display:flex;flex-direction:column}.status{min-height:1.5em}.hint{color:#555;font-size:.9rem}</style>"
+    "<h1>LED controller</h1><p>Changes preview immediately on the strings. They are written to flash only when you click <b>Save all settings</b>.</p><main id=strings></main>"
+    "<p><button type=button onclick=save()>Save all settings</button> <button type=button onclick=rebootController()>Restart controller</button></p><p id=status class=status></p>"
+    "<script>let timers={};function card(x,i){let c='#'+[x.red,x.green,x.blue].map(v=>v.toString(16).padStart(2,'0')).join('');return `<section><h2>String ${i+1}</h2><div class=row><label>Physical LED string length<input id=p${i} type=number min=0 max=2048 value=${x.physicalLength}></label><label>LED control length<input id=l${i} type=number min=0 max=2048 value=${x.controlLength}></label><label>Colour<input id=c${i} type=color value=${c}></label><label>Intensity: <span id=iv${i}>${x.intensity}%</span><input id=i${i} type=range min=0 max=100 value=${x.intensity}></label></div><p class=hint>LEDs from the control length to the physical length are sent black (off).</p></section>`}"
+    "async function refresh(){let s=await(await fetch('/api/state')).json();strings.innerHTML=s.strings.map(card).join('');s.strings.forEach((_,i)=>{for(let id of ['p','l','c','i'])document.getElementById(id+i).addEventListener('input',()=>changed(i))})}"
+    "function changed(n){iv(n).textContent=i(n).value+'%';clearTimeout(timers[n]);timers[n]=setTimeout(()=>preview(n),150)}function el(p,n){return document.getElementById(p+n)}function p(n){return el('p',n)}function l(n){return el('l',n)}function i(n){return el('i',n)}function c(n){return el('c',n)}function iv(n){return el('iv',n)}"
+    "async function preview(n){let physical=Number(p(n).value),control=Number(l(n).value),v=c(n).value;if(control>physical){status.textContent='Control length cannot exceed physical length.';return false}let q=new URLSearchParams({index:n,physical,control,red:parseInt(v.slice(1,3),16),green:parseInt(v.slice(3,5),16),blue:parseInt(v.slice(5),16),intensity:i(n).value});let r=await fetch('/api/preview?'+q,{method:'POST'});status.textContent=r.ok?'Preview applied; not saved.':await r.text();return r.ok}"
+    "async function save(){Object.values(timers).forEach(clearTimeout);for(let n=0;n<4;n++)if(!await preview(n))return;let r=await fetch('/api/save',{method:'POST'});status.textContent=r.ok?'All settings saved to flash.':await r.text()}"
+    "async function rebootController(){if(!confirm('Restart the LED controller now? Unsaved previews will be discarded.'))return;status.textContent='Restarting controller...';let r=await fetch('/api/reboot',{method:'POST'});if(!r.ok){status.textContent=await r.text();return}setTimeout(()=>location.reload(),5000)}refresh()</script>";
 
 static esp_err_t serve_index(httpd_req_t *request)
 {
@@ -33,7 +34,7 @@ static esp_err_t serve_index(httpd_req_t *request)
 
 static bool query_integer(httpd_req_t *request, const char *name, long *value)
 {
-    char query[128];
+    char query[256];
     char text_value[16];
     if (httpd_req_get_url_query_str(request, query, sizeof(query)) != ESP_OK ||
         httpd_query_key_value(query, name, text_value, sizeof(text_value)) != ESP_OK) {
@@ -44,83 +45,63 @@ static bool query_integer(httpd_req_t *request, const char *name, long *value)
     return *text_value != '\0' && *end == '\0';
 }
 
-static esp_err_t send_bad_request(httpd_req_t *request, const char *message)
+static esp_err_t preview_string(httpd_req_t *request)
 {
-    return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, message);
-}
-
-static esp_err_t set_external_string(httpd_req_t *request)
-{
-    long index;
-    long enabled;
-    if (!query_integer(request, "index", &index) || !query_integer(request, "enabled", &enabled) ||
-        index < 0 || index >= EXTERNAL_LED_STRING_COUNT || (enabled != 0 && enabled != 1)) {
-        return send_bad_request(request, "Expected index=0..3 and enabled=0|1");
+    long index, physical, control, red, green, blue, intensity;
+    if (!query_integer(request, "index", &index) || !query_integer(request, "physical", &physical) ||
+        !query_integer(request, "control", &control) || !query_integer(request, "red", &red) ||
+        !query_integer(request, "green", &green) || !query_integer(request, "blue", &blue) ||
+        !query_integer(request, "intensity", &intensity) || index < 0 || index >= EXTERNAL_LED_STRING_COUNT ||
+        physical < 0 || physical > LED_STRING_MAXIMUM_PHYSICAL_LENGTH || control < 0 || control > physical ||
+        red < 0 || red > 255 || green < 0 || green > 255 || blue < 0 || blue > 255 || intensity < 0 || intensity > 100) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid settings: control length must be no greater than physical length; maximum length is 2048");
     }
-    ESP_RETURN_ON_ERROR(led_controller_set_external_enabled((size_t)index, enabled == 1), "web-server", "Could not update string");
+    const led_string_settings_t settings = {
+        .physical_length = (size_t)physical, .control_length = (size_t)control,
+        .red = (uint8_t)red, .green = (uint8_t)green, .blue = (uint8_t)blue,
+        .intensity_percent = (uint8_t)intensity,
+    };
+    ESP_RETURN_ON_ERROR(led_controller_preview_string((size_t)index, &settings), "web-server", "Could not preview string");
     return httpd_resp_sendstr(request, "OK");
 }
 
-static esp_err_t set_onboard_led(httpd_req_t *request)
+static esp_err_t save_settings(httpd_req_t *request)
 {
-    long red;
-    long green;
-    long blue;
-    if (!query_integer(request, "red", &red) || !query_integer(request, "green", &green) || !query_integer(request, "blue", &blue) ||
-        red < 0 || red > 255 || green < 0 || green > 255 || blue < 0 || blue > 255) {
-        return send_bad_request(request, "Expected red, green and blue values from 0 to 255");
-    }
-    ESP_RETURN_ON_ERROR(led_controller_set_onboard_color(red, green, blue), "web-server", "Could not update onboard LED");
+    ESP_RETURN_ON_ERROR(led_controller_save_settings(), "web-server", "Could not save settings");
     return httpd_resp_sendstr(request, "OK");
+}
+
+static esp_err_t serve_state(httpd_req_t *request)
+{
+    led_string_settings_t strings[EXTERNAL_LED_STRING_COUNT];
+    led_controller_get_settings(strings);
+    char response[768];
+    size_t used = 0;
+    used += snprintf(response + used, sizeof(response) - used, "{\"strings\":[");
+    for (size_t index = 0; index < EXTERNAL_LED_STRING_COUNT; index++) {
+        used += snprintf(response + used, sizeof(response) - used,
+            "%s{\"physicalLength\":%u,\"controlLength\":%u,\"red\":%u,\"green\":%u,\"blue\":%u,\"intensity\":%u}",
+            index == 0 ? "" : ",", (unsigned)strings[index].physical_length, (unsigned)strings[index].control_length,
+            strings[index].red, strings[index].green, strings[index].blue, strings[index].intensity_percent);
+    }
+    used += snprintf(response + used, sizeof(response) - used, "]}");
+    httpd_resp_set_type(request, "application/json");
+    return httpd_resp_send(request, response, used);
 }
 
 static void reboot_after_http_response(void *task_parameter)
 {
     (void)task_parameter;
-
-    // Restarting immediately inside the HTTP handler can close the network
-    // connection before the browser receives its success response. This short
-    // delay lets the server finish transmitting the response first.
     vTaskDelay(pdMS_TO_TICKS(REBOOT_RESPONSE_DELAY_MILLISECONDS));
     esp_restart();
 }
 
 static esp_err_t reboot_controller(httpd_req_t *request)
 {
-    const BaseType_t task_created = xTaskCreate(
-        reboot_after_http_response,
-        "reboot-controller",
-        REBOOT_TASK_STACK_SIZE,
-        NULL,
-        REBOOT_TASK_PRIORITY,
-        NULL
-    );
-    if (task_created != pdPASS) {
-        return httpd_resp_send_err(
-            request,
-            HTTPD_500_INTERNAL_SERVER_ERROR,
-            "Could not schedule controller restart"
-        );
+    if (xTaskCreate(reboot_after_http_response, "reboot-controller", REBOOT_TASK_STACK_SIZE, NULL, REBOOT_TASK_PRIORITY, NULL) != pdPASS) {
+        return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Could not schedule controller restart");
     }
-
     return httpd_resp_sendstr(request, "Restarting");
-}
-
-static esp_err_t serve_state(httpd_req_t *request)
-{
-    external_led_string_state_t strings[EXTERNAL_LED_STRING_COUNT];
-    onboard_led_color_t onboard;
-    led_controller_get_state(strings, &onboard);
-    char response[512];
-    int length = snprintf(response, sizeof(response),
-        "{\"strings\":[{\"enabled\":%s,\"length\":%u,\"pattern\":\"%s\"},{\"enabled\":%s,\"length\":%u,\"pattern\":\"%s\"},{\"enabled\":%s,\"length\":%u,\"pattern\":\"%s\"},{\"enabled\":%s,\"length\":%u,\"pattern\":\"%s\"}],\"onboard\":{\"red\":%u,\"green\":%u,\"blue\":%u}}",
-        strings[0].enabled ? "true" : "false", (unsigned)strings[0].led_count, strings[0].pattern_name,
-        strings[1].enabled ? "true" : "false", (unsigned)strings[1].led_count, strings[1].pattern_name,
-        strings[2].enabled ? "true" : "false", (unsigned)strings[2].led_count, strings[2].pattern_name,
-        strings[3].enabled ? "true" : "false", (unsigned)strings[3].led_count, strings[3].pattern_name,
-        onboard.red, onboard.green, onboard.blue);
-    httpd_resp_set_type(request, "application/json");
-    return httpd_resp_send(request, response, length);
 }
 
 esp_err_t web_server_start(void)
@@ -132,12 +113,12 @@ esp_err_t web_server_start(void)
     const httpd_uri_t routes[] = {
         {.uri = "/", .method = HTTP_GET, .handler = serve_index},
         {.uri = "/api/state", .method = HTTP_GET, .handler = serve_state},
-        {.uri = "/api/string", .method = HTTP_POST, .handler = set_external_string},
-        {.uri = "/api/onboard", .method = HTTP_POST, .handler = set_onboard_led},
+        {.uri = "/api/preview", .method = HTTP_POST, .handler = preview_string},
+        {.uri = "/api/save", .method = HTTP_POST, .handler = save_settings},
         {.uri = "/api/reboot", .method = HTTP_POST, .handler = reboot_controller},
     };
-    for (size_t route_index = 0; route_index < sizeof(routes) / sizeof(routes[0]); route_index++) {
-        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &routes[route_index]), "web-server", "Could not register HTTP route");
+    for (size_t index = 0; index < sizeof(routes) / sizeof(routes[0]); index++) {
+        ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &routes[index]), "web-server", "Could not register HTTP route");
     }
     return ESP_OK;
 }

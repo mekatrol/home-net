@@ -17,6 +17,7 @@
 #define SEQUENCE_API_PORT 5050U
 #define FETCH_TASK_STACK_SIZE 8192
 #define FETCH_TASK_PRIORITY 4
+#define SEQUENCE_CONFIGURATION_REFRESH_INTERVAL_MILLISECONDS 3000
 #define MAXIMUM_HTTP_RESPONSE_BYTES (1024 * 1024)
 #define MAXIMUM_SEQUENCES_PER_STRING 100
 
@@ -234,24 +235,36 @@ static void fetch_task(void *task_parameter)
         .timeout_ms = 10000,
     };
     esp_http_client_handle_t client = esp_http_client_init(&configuration);
-    esp_err_t result = client == NULL ? ESP_ERR_NO_MEM : esp_http_client_perform(client);
-    if (result == ESP_OK && esp_http_client_get_status_code(client) != 200) {
-        ESP_LOGE(TAG, "GET %s returned HTTP %d", url, esp_http_client_get_status_code(client));
-        result = ESP_FAIL;
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Could not create HTTP client for %s", url);
+        vTaskDelete(NULL);
+        return;
     }
-    if (result == ESP_OK) {
-        result = apply_response(response.bytes, response.length);
+
+    while (true) {
+        // Keep the allocated buffer for the next request, but discard the
+        // previous document before the HTTP event handler appends new bytes.
+        response.length = 0;
+        if (response.bytes != NULL) {
+            response.bytes[0] = '\0';
+        }
+
+        esp_err_t result = esp_http_client_perform(client);
+        if (result == ESP_OK && esp_http_client_get_status_code(client) != 200) {
+            ESP_LOGE(TAG, "GET %s returned HTTP %d", url, esp_http_client_get_status_code(client));
+            result = ESP_FAIL;
+        }
+        if (result == ESP_OK) {
+            result = apply_response(response.bytes, response.length);
+        }
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "Applied LED sequences from %s", url);
+        } else {
+            ESP_LOGE(TAG, "Could not apply %s: %s", url, esp_err_to_name(result));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(SEQUENCE_CONFIGURATION_REFRESH_INTERVAL_MILLISECONDS));
     }
-    if (result == ESP_OK) {
-        ESP_LOGI(TAG, "Applied LED sequences from %s", url);
-    } else {
-        ESP_LOGE(TAG, "Could not apply %s: %s", url, esp_err_to_name(result));
-    }
-    if (client != NULL) {
-        esp_http_client_cleanup(client);
-    }
-    free(response.bytes);
-    vTaskDelete(NULL);
 }
 
 esp_err_t led_sequence_api_fetch(const char *controller_ip_address)
