@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "led_controller.c"
+        "led_settings.c"
         "main.c"
         "web_server.c"
         "wifi_station.c"

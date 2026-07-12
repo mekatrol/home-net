@@ -43,6 +43,18 @@ to set:
 - GPIO for each external LED output (defaults: GPIO 4, 5, 6, and 7)
 - LED count for each string (defaults: 30, 60, 90, and 120)
 
+These LED counts are factory defaults. The web interface has a **Settings**
+section where each string's count can be saved to the ESP32's non-volatile
+storage. Saved counts survive resets and power loss and override the factory
+defaults. Restart the controller after saving because frame buffers are sized
+once, before the LED task starts. The Settings section includes a restart
+button, so the controller can be rebooted without physical access to its power.
+
+**Preview colour** applies the onboard LED colour immediately without writing it
+to storage. The colour picker is in the Settings panel, where **Save settings**
+saves the selected colour together with all four string
+lengths. The saved colour is then restored after a restart or power loss.
+
 The firmware cannot connect until the Wi-Fi SSID is set. If it is left empty,
 the serial monitor reports the missing setting and leaves the LED task running
 instead of entering a reboot loop. An empty password is supported for an open

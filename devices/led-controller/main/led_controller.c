@@ -12,6 +12,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include "led_settings.h"
 
 #define ONBOARD_ADDRESSABLE_LED_GPIO 21
 #define ADDRESSABLE_LED_RMT_RESOLUTION_HZ 10000000
@@ -226,6 +227,29 @@ static void led_pattern_task(void *task_parameter)
 
 esp_err_t led_controller_start(void)
 {
+    size_t configured_led_counts[EXTERNAL_LED_STRING_COUNT];
+    ESP_RETURN_ON_ERROR(
+        led_settings_load_counts(configured_led_counts),
+        TAG,
+        "Could not load LED string settings"
+    );
+    for (size_t string_index = 0; string_index < EXTERNAL_LED_STRING_COUNT; string_index++) {
+        // Counts must be applied before initialize_external_string() allocates
+        // its frame buffer. The buffer size and every RMT transmission length
+        // then remain consistent for the lifetime of this boot.
+        external_led_strings[string_index].led_count = configured_led_counts[string_index];
+    }
+
+    ESP_RETURN_ON_ERROR(
+        led_settings_load_onboard_color(
+            &current_onboard_color.red,
+            &current_onboard_color.green,
+            &current_onboard_color.blue
+        ),
+        TAG,
+        "Could not load onboard LED colour setting"
+    );
+
     state_mutex = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(state_mutex != NULL, ESP_ERR_NO_MEM, TAG, "Could not create LED state mutex");
     ESP_RETURN_ON_ERROR(initialize_onboard_led(), TAG, "Could not initialize onboard LED");
