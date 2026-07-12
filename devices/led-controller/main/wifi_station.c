@@ -26,7 +26,9 @@ static void handle_wifi_event(void *argument, esp_event_base_t event_base, int32
         const ip_event_got_ip_t *event = event_data;
         ESP_LOGI(TAG, "Wi-Fi connected, open http://" IPSTR "/", IP2STR(&event->ip_info.ip));
         if (!network_service_started) {
-            ESP_ERROR_CHECK(ready_callback());
+            char controller_ip_address[16];
+            esp_ip4addr_ntoa(&event->ip_info.ip, controller_ip_address, sizeof(controller_ip_address));
+            ESP_ERROR_CHECK(ready_callback(controller_ip_address));
             network_service_started = true;
         }
     }

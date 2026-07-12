@@ -1,8 +1,9 @@
 # LED Controller
 
 ESP-IDF C project for an ESP32-S3FH4R2 development board. The firmware provides
-a Wi-Fi web interface for the onboard WS2812 addressable RGB LED and four
-independent external addressable LED strings.
+a Wi-Fi controller for the onboard WS2812 addressable RGB LED and up to four
+independent external addressable LED strings. LED frames come from the
+`led-sequence.lan` HTTP API.
 
 The supplied board is configured for:
 
@@ -25,14 +26,55 @@ The supplied board is configured for:
 
 - Core 0 runs ESP-IDF's Wi-Fi driver and the HTTP server.
 - Core 1 runs the LED pattern task.
+- After DHCP assigns an address, a separate FreeRTOS task requests
+  `http://led-sequence.lan/<controller-ip-address>`. Network I/O and JSON
+  parsing therefore do not block the Wi-Fi event loop or LED playback.
 - Four Remote Control Transceiver (RMT) transmit channels generate the four
   external LED waveforms in hardware after each frame is queued.
 - The ESP32-S3 only has four RMT transmit channels. The onboard LED therefore
   uses the SPI peripheral, with each WS2812 bit encoded into three SPI bits.
 
 RMT means that neither processor core has to bit-bang timing-sensitive LED
-data. Each external string has its own frame buffer, length, channel, and
-pattern state, so strings do not need to have matching lengths or effects.
+data. Each returned string has its own frame collection, inferred length,
+channel order, and RMT channel, so strings do not need to have matching lengths
+or sequences. The controller converts the JSON colors to wire-order bytes once
+when the response is applied; playback does no JSON work.
+
+## Sequence API
+
+The controller performs this request once after its first successful Wi-Fi
+connection:
+
+```text
+GET http://led-sequence.lan/<controller-ip-address>
+Accept: application/json
+```
+
+See `sample-api-response.json` for a complete response. The contract is:
+
+- Each `onboard` or `stringN` object has its own positive
+  `sequenceIntervalMs`. Outputs advance independently rather than sharing a
+  global frame rate.
+- `onboard.sequences` contains base64-encoded, wire-order RGB pixels, one pixel
+  per frame. The onboard LED on this board is physically RGB.
+- `string1` through `string4` are optional. A missing property means "do
+  nothing" for that output.
+- `format` is the byte order required by that physical string, for example
+  `grb`, `rgb`, `grbw`, or `rgbw`.
+- `bytesPerLed` must be `3` for an RGB format or `4` for RGBW, and must match
+  the length of `format`.
+- `ledCount` declares the number of addressable pixels on that output.
+- Each `sequences` array contains 0 to 100 base64 strings, one per frame. An empty array
+  means "do nothing". Each decoded frame must contain exactly
+  `ledCount * bytesPerLed` bytes.
+- A malformed string is rejected and logged. That string's existing output is
+  kept; the firmware never installs a partially parsed frame collection.
+
+The base64 data is already arranged in the order named by `format`; the
+controller can therefore give it directly to the Remote Control Transceiver
+(RMT) peripheral after validating its decoded length. Keeping `format` beside
+the compact data makes swapped color channels diagnosable without expanding
+every pixel into JSON properties.
 
 ## Configuration
 
@@ -41,19 +83,6 @@ to set:
 
 - Wi-Fi SSID and password
 - GPIO for each external LED output (defaults: GPIO 4, 5, 6, and 7)
-- LED count for each string (defaults: 30, 60, 90, and 120)
-
-These LED counts are factory defaults. The web interface has a **Settings**
-section where each string's count can be saved to the ESP32's non-volatile
-storage. Saved counts survive resets and power loss and override the factory
-defaults. Restart the controller after saving because frame buffers are sized
-once, before the LED task starts. The Settings section includes a restart
-button, so the controller can be rebooted without physical access to its power.
-
-**Preview colour** applies the onboard LED colour immediately without writing it
-to storage. The colour picker is in the Settings panel, where **Save settings**
-saves the selected colour together with all four string
-lengths. The saved colour is then restored after a restart or power loss.
 
 The firmware cannot connect until the Wi-Fi SSID is set. If it is left empty,
 the serial monitor reports the missing setting and leaves the LED task running
@@ -62,13 +91,14 @@ access point.
 
 `sdkconfig` is ignored, so Wi-Fi credentials are not committed. Safe board
 defaults remain checked in as `sdkconfig.defaults`. After flashing, the serial
-log prints the assigned IP address. Open that address in a browser to toggle
-the four strings and set the onboard LED colour.
+log prints the assigned IP address. Open that address in a browser to inspect
+the applied state, temporarily toggle strings, preview the onboard LED colour,
+or restart the controller.
 
-The starter patterns are solid, chase, rainbow, and blink. They are deliberately
-kept in the LED task rather than the HTTP handlers; web requests only update
-shared state protected by a mutex. All external strings and the onboard LED
-start turned off after every boot.
+All external strings and the onboard LED start turned off. Valid API fields
+replace that state after Wi-Fi connects. The local web page remains available
+for diagnostics and temporary manual overrides; restarting fetches the API
+configuration again.
 
 ## SN74AHCT125N wiring
 

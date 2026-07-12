@@ -3,10 +3,17 @@
 #include "nvs_flash.h"
 
 #include "led_controller.h"
+#include "led_sequence_api.h"
 #include "web_server.h"
 #include "wifi_station.h"
 
 static const char *TAG = "led-controller-main";
+
+static esp_err_t start_network_services(const char *controller_ip_address)
+{
+    ESP_RETURN_ON_ERROR(web_server_start(), TAG, "Could not start diagnostic web server");
+    return led_sequence_api_fetch(controller_ip_address);
+}
 
 static void initialize_nonvolatile_storage(void)
 {
@@ -31,7 +38,7 @@ void app_main(void)
     // ESP-IDF pins its Wi-Fi driver to core 0 for this target. The HTTP server
     // is also pinned there by web_server_start(), keeping network work away
     // from pattern calculation on core 1.
-    const esp_err_t wifi_start_result = led_controller_wifi_start(web_server_start);
+    const esp_err_t wifi_start_result = led_controller_wifi_start(start_network_services);
     if (wifi_start_result != ESP_OK) {
         // Keep the LED task alive when network configuration is missing. This
         // makes the configuration error readable in the serial monitor instead

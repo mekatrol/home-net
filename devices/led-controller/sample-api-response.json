@@ -1,0 +1,22 @@
+{
+    "onboard": {
+        "sequenceIntervalMs": 250,
+        "format": "rgb",
+        "bytesPerLed": 3,
+        "sequences": [
+            "/4D/",
+            "AP+A"
+        ]
+    },
+    "string1": {
+        "sequenceIntervalMs": 1000,
+        "format": "grb",
+        "bytesPerLed": 3,
+        "ledCount": 16,
+        "ledCountIsAssumed": true,
+        "sequences": [
+            "tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/tAD/",
+            "AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/AFD/"
+        ]
+    }
+}

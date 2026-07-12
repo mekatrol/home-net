@@ -1,7 +1,7 @@
 idf_component_register(
     SRCS
         "led_controller.c"
-        "led_settings.c"
+        "led_sequence_api.c"
         "main.c"
         "web_server.c"
         "wifi_station.c"
@@ -11,7 +11,10 @@ idf_component_register(
         esp_driver_spi
         esp_event
         esp_http_server
+        esp_http_client
         esp_netif
         esp_wifi
         nvs_flash
+        cjson
+        mbedtls
 )

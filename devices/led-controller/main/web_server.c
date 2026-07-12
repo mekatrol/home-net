@@ -9,7 +9,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led_controller.h"
-#include "led_settings.h"
 
 #define REBOOT_TASK_STACK_SIZE 2048
 #define REBOOT_TASK_PRIORITY 5
@@ -18,16 +17,13 @@
 static const char INDEX_HTML[] =
     "<!doctype html><meta name=viewport content='width=device-width'><title>LED controller</title>"
     "<style>body{font:18px sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem}button,input{font:inherit;margin:.3rem}input[type=number]{width:7rem}section{padding:1rem;border:1px solid #aaa;margin:1rem 0}.status{min-height:1.5em}</style>"
-    "<h1>LED controller</h1><section id=strings></section>"
-    "<section><h2>Settings</h2><h3>Onboard LED colour</h3><p><input id=color type=color value=#080808><button type=button onclick=setColor()>Preview colour</button></p><p>The selected colour is stored only when you press <strong>Save settings</strong>.</p><h3>External string lengths</h3><p>Set the number of LEDs physically connected to each output.</p><form id=settings></form><button type=button onclick=saveSettings()>Save settings</button><p id=settingsStatus class=status></p><button type=button onclick=rebootController()>Restart controller</button></section>"
+    "<h1>LED controller</h1><p>Sequences are supplied by led-sequence.lan.</p><section id=strings></section>"
+    "<section><h2>Diagnostics</h2><h3>Onboard LED colour</h3><p><input id=color type=color value=#000000><button type=button onclick=setColor()>Preview colour</button></p><p id=status class=status></p><button type=button onclick=rebootController()>Restart controller</button></section>"
     "<script>async function refresh(){let s=await(await fetch('/api/state')).json();strings.innerHTML=s.strings.map((x,i)=>`<p>String ${i+1}: ${x.length} LEDs, ${x.pattern} <button onclick=toggle(${i},${!x.enabled})>${x.enabled?'Turn off':'Turn on'}</button></p>`).join('');color.value='#'+[s.onboard.red,s.onboard.green,s.onboard.blue].map(x=>x.toString(16).padStart(2,'0')).join('')}"
     "async function toggle(i,e){await fetch(`/api/string?index=${i}&enabled=${e?1:0}`,{method:'POST'});refresh()}"
-    "async function setColor(){let v=color.value;let r=await fetch(`/api/onboard?red=${parseInt(v.slice(1,3),16)}&green=${parseInt(v.slice(3,5),16)}&blue=${parseInt(v.slice(5),16)}`,{method:'POST'});settingsStatus.textContent=r.ok?'Colour preview applied. Use Save settings to keep it after a restart.':await r.text();if(r.ok)refresh()}"
-    "function buildSettings(){settings.innerHTML=[0,1,2,3].map(i=>`<p><label>String ${i+1} <input id=count${i} type=number min=1 max=2048 required></label></p>`).join('')}"
-    "async function loadSettings(){let s=await(await fetch('/api/settings')).json();s.ledCounts.forEach((n,i)=>document.getElementById('count'+i).value=n)}"
-    "async function saveSettings(){if(!settings.reportValidity())return;let v=color.value,p=new URLSearchParams();[0,1,2,3].forEach(i=>p.set('count'+i,document.getElementById('count'+i).value));p.set('red',parseInt(v.slice(1,3),16));p.set('green',parseInt(v.slice(3,5),16));p.set('blue',parseInt(v.slice(5),16));settingsStatus.textContent='Saving settings...';let r=await fetch('/api/settings?'+p,{method:'POST'});settingsStatus.textContent=r.ok?'Settings saved. Restart the controller to apply LED count changes.':await r.text()}"
-    "async function rebootController(){if(!confirm('Restart the LED controller now?'))return;settingsStatus.textContent='Restarting controller...';let r=await fetch('/api/reboot',{method:'POST'});if(!r.ok){settingsStatus.textContent=await r.text();return}settingsStatus.textContent='Restarting. This page will reconnect shortly.';setTimeout(()=>location.reload(),5000)}"
-    "buildSettings();refresh();loadSettings()</script>";
+    "async function setColor(){let v=color.value;let r=await fetch(`/api/onboard?red=${parseInt(v.slice(1,3),16)}&green=${parseInt(v.slice(3,5),16)}&blue=${parseInt(v.slice(5),16)}`,{method:'POST'});status.textContent=r.ok?'Temporary colour applied.':await r.text();if(r.ok)refresh()}"
+    "async function rebootController(){if(!confirm('Restart the LED controller now?'))return;status.textContent='Restarting controller...';let r=await fetch('/api/reboot',{method:'POST'});if(!r.ok){status.textContent=await r.text();return}status.textContent='Restarting. This page will reconnect shortly.';setTimeout(()=>location.reload(),5000)}"
+    "refresh()</script>";
 
 static esp_err_t serve_index(httpd_req_t *request)
 {
@@ -75,54 +71,6 @@ static esp_err_t set_onboard_led(httpd_req_t *request)
         return send_bad_request(request, "Expected red, green and blue values from 0 to 255");
     }
     ESP_RETURN_ON_ERROR(led_controller_set_onboard_color(red, green, blue), "web-server", "Could not update onboard LED");
-    return httpd_resp_sendstr(request, "OK");
-}
-
-static esp_err_t serve_settings(httpd_req_t *request)
-{
-    size_t led_counts[EXTERNAL_LED_STRING_COUNT];
-    ESP_RETURN_ON_ERROR(led_settings_load_counts(led_counts), "web-server", "Could not load settings");
-    char response[128];
-    const int response_length = snprintf(
-        response,
-        sizeof(response),
-        "{\"ledCounts\":[%u,%u,%u,%u]}",
-        (unsigned)led_counts[0],
-        (unsigned)led_counts[1],
-        (unsigned)led_counts[2],
-        (unsigned)led_counts[3]
-    );
-    httpd_resp_set_type(request, "application/json");
-    return httpd_resp_send(request, response, response_length);
-}
-
-static esp_err_t save_settings(httpd_req_t *request)
-{
-    size_t led_counts[EXTERNAL_LED_STRING_COUNT];
-    long parsed_led_counts[EXTERNAL_LED_STRING_COUNT];
-    const char *const count_parameter_names[] = {"count0", "count1", "count2", "count3"};
-    for (size_t string_index = 0; string_index < EXTERNAL_LED_STRING_COUNT; string_index++) {
-        if (!query_integer(request, count_parameter_names[string_index], &parsed_led_counts[string_index]) ||
-            parsed_led_counts[string_index] < MINIMUM_LEDS_PER_STRING ||
-            parsed_led_counts[string_index] > MAXIMUM_LEDS_PER_STRING) {
-            return send_bad_request(request, "Expected count0 through count3 values from 1 to 2048");
-        }
-        led_counts[string_index] = (size_t)parsed_led_counts[string_index];
-    }
-
-    long red;
-    long green;
-    long blue;
-    if (!query_integer(request, "red", &red) || !query_integer(request, "green", &green) ||
-        !query_integer(request, "blue", &blue) || red < 0 || red > 255 ||
-        green < 0 || green > 255 || blue < 0 || blue > 255) {
-        return send_bad_request(request, "Expected red, green and blue values from 0 to 255");
-    }
-    ESP_RETURN_ON_ERROR(
-        led_settings_save(led_counts, (uint8_t)red, (uint8_t)green, (uint8_t)blue),
-        "web-server",
-        "Could not save LED settings"
-    );
     return httpd_resp_sendstr(request, "OK");
 }
 
@@ -186,8 +134,6 @@ esp_err_t web_server_start(void)
         {.uri = "/api/state", .method = HTTP_GET, .handler = serve_state},
         {.uri = "/api/string", .method = HTTP_POST, .handler = set_external_string},
         {.uri = "/api/onboard", .method = HTTP_POST, .handler = set_onboard_led},
-        {.uri = "/api/settings", .method = HTTP_GET, .handler = serve_settings},
-        {.uri = "/api/settings", .method = HTTP_POST, .handler = save_settings},
         {.uri = "/api/reboot", .method = HTTP_POST, .handler = reboot_controller},
     };
     for (size_t route_index = 0; route_index < sizeof(routes) / sizeof(routes[0]); route_index++) {

@@ -2,6 +2,6 @@
 
 #include "esp_err.h"
 
-typedef esp_err_t (*network_ready_callback_t)(void);
+typedef esp_err_t (*network_ready_callback_t)(const char *controller_ip_address);
 
 esp_err_t led_controller_wifi_start(network_ready_callback_t network_ready_callback);
