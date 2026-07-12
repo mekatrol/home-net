@@ -9,6 +9,10 @@ public sealed record ControllerDefinition(
     OutputDefinition? String3,
     OutputDefinition? String4);
 
+public sealed record CreateControllerRequest(
+    string Address,
+    ControllerDefinition Definition);
+
 public sealed record OutputDefinition(
     int SequenceIntervalMs,
     string Format,

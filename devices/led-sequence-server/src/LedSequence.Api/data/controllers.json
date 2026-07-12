@@ -5,18 +5,29 @@
       "format": "rgb",
       "ledCount": 1,
       "frames": [
-        { "fill": "#ff80ff" },
-        { "fill": "#00ff80" }
+        {
+          "fill": "#ff80ff",
+          "pixels": null
+        },
+        {
+          "fill": "#00ff80",
+          "pixels": null
+        }
       ]
     },
     "string1": {
       "sequenceIntervalMs": 1000,
       "format": "grb",
-      "ledCount": 16,
+      "ledCount": 119,
       "frames": [
-        { "fill": "#00b4ff" },
-        { "fill": "#5000ff" }
+        {
+          "fill": "#c8ff00",
+          "pixels": null
+        }
       ]
-    }
+    },
+    "string2": null,
+    "string3": null,
+    "string4": null
   }
 }
