@@ -3,15 +3,20 @@
 This bundle restores the following setup without replacing the rest of a fresh
 PrusaSlicer configuration:
 
-- Physical printer `Prusa MK2.5S`, using the bundled 0.4 mm preset.
+- Physical printer `Prusa MK2.5S`, using an inheriting 0.4 mm preset with binary G-code disabled.
 - Physical printer `Prusa MK4S`, using the same PrusaLink connection for:
   - standard MK4S: 0.25, 0.4, and 0.6 mm;
   - MK4S with MMU3: 0.25, 0.4, and 0.6 mm.
-- Custom `Original Prusa MK4S MMU3 0.25 nozzle` printer preset.
+- Inheriting printer presets that disable binary G-code for every listed printer/nozzle combination.
 - Custom `PLA Low Temp` filament preset.
 
-The standard Prusa presets are not copied here. A fresh PrusaSlicer install
-supplies and updates them.
+The standard Prusa presets are supplied and updated by PrusaSlicer. The
+installers set `binary_gcode = 0` directly in the relevant bundled preset
+sections so their original names remain unchanged. The custom MMU3 0.25 mm
+preset is a standalone resolved copy of the bundled MMU3 0.4 mm configuration
+with the nozzle-specific values changed to 0.25 mm. Keeping it standalone avoids
+PrusaSlicer falling back to generic firmware defaults when loading a custom
+preset whose parent is bundled.
 
 ## Prepare the fresh installation
 
@@ -59,7 +64,15 @@ To install into a different configuration directory:
 ```
 
 Both installers check that PrusaSlicer is closed, verify that the required MMU3
-parent preset is enabled, and back up any files they replace.
+parent preset is enabled, and synchronize every preset in this bundle. They are
+safe to run again whenever this backup changes: missing files are installed,
+changed files are backed up and replaced, and files already at the current
+version are left untouched. Repeated runs therefore produce the same installed
+configuration without accumulating backups for unchanged files.
+
+PrusaSlicer may replace its bundled preset file when its profiles are updated.
+After a PrusaSlicer profile update, close PrusaSlicer and rerun the installer to
+reapply the binary G-code overrides.
 
 After installation, start PrusaSlicer and verify:
 
@@ -93,7 +106,7 @@ keys. Keep this backup private. Before sharing or committing it, remove the
 install.sh
 install.ps1
 README.md
-printer/Original Prusa MK4S MMU3 0.25 nozzle.ini
+printer/*.ini
 physical_printer/Prusa MK2.5S.ini
 physical_printer/Prusa MK4S.ini
 filament/PLA Low Temp.ini
