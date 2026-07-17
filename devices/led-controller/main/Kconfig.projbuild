@@ -20,15 +20,15 @@ menu "LED controller"
         range 0 46
     config LED_CONTROLLER_STRING_2_GPIO
         int "String 2 GPIO"
-        default 5
+        default 3
         range 0 46
     config LED_CONTROLLER_STRING_3_GPIO
         int "String 3 GPIO"
-        default 6
+        default 5
         range 0 46
     config LED_CONTROLLER_STRING_4_GPIO
         int "String 4 GPIO"
-        default 7
+        default 6
         range 0 46
 
 endmenu
