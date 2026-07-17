@@ -2,9 +2,10 @@
 
 ESP-IDF C project for an ESP32-S3FH4R2 development board. The firmware provides
 a Wi-Fi controller for up to four independent external addressable LED strings.
-Each string's solid colour,
-intensity, physical length, and control length are configured directly through
-the controller's local web interface. No application server is required.
+The onboard addressable LED can also be controlled. Each external string's
+solid colour, intensity, physical length, and control length are configured
+directly through the controller's local web interface. No application server is
+required.
 
 The supplied board is configured for:
 
@@ -47,6 +48,9 @@ strings has these settings:
   string that receive the selected colour. It cannot exceed physical length.
 - **Colour**: the solid RGB colour for controlled pixels.
 - **Intensity**: a 0 to 100 percent brightness scale applied to that colour.
+
+The onboard LED has the same colour and intensity controls. Its physical and
+control lengths are fixed at one, so those length fields are not shown for it.
 
 Changing any field previews the complete string immediately but changes only
 the controller's RAM. Pixels between control length and physical length are

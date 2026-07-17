@@ -22,5 +22,7 @@ esp_err_t led_controller_start(void);
 // Applies a preview to the LEDs and RAM only. Call led_controller_save_settings()
 // separately when the user explicitly chooses to write the preview to flash.
 esp_err_t led_controller_preview_string(size_t string_index, const led_string_settings_t *settings);
+esp_err_t led_controller_preview_onboard(const led_string_settings_t *settings);
 esp_err_t led_controller_save_settings(void);
 void led_controller_get_settings(led_string_settings_t strings[EXTERNAL_LED_STRING_COUNT]);
+void led_controller_get_onboard_settings(led_string_settings_t *settings);

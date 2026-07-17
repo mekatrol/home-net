@@ -6,6 +6,7 @@
 
 #include "driver/rmt_encoder.h"
 #include "driver/rmt_tx.h"
+#include "driver/spi_master.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -16,6 +17,8 @@
 
 #define ADDRESSABLE_LED_RMT_RESOLUTION_HZ 10000000
 #define ADDRESSABLE_LED_RMT_MEMORY_SYMBOLS 48
+#define ONBOARD_ADDRESSABLE_LED_GPIO 21
+#define ONBOARD_LED_SPI_CLOCK_HZ 2400000
 #define LED_REFRESH_INTERVAL_MILLISECONDS 500
 #define LED_REFRESH_TASK_PRIORITY 4
 #define LED_REFRESH_TASK_STACK_SIZE 3072
@@ -40,6 +43,11 @@ static external_led_string_t external_led_strings[EXTERNAL_LED_STRING_COUNT] = {
 };
 
 static SemaphoreHandle_t state_mutex;
+static spi_device_handle_t onboard_led_spi_device;
+static led_string_settings_t onboard_led_settings = {
+    .physical_length = 1,
+    .control_length = 1,
+};
 
 static bool settings_are_valid(const led_string_settings_t *settings)
 {
@@ -70,6 +78,65 @@ static esp_err_t initialize_external_string(external_led_string_t *string)
     ESP_RETURN_ON_ERROR(rmt_new_tx_channel(&channel_configuration, &string->transmit_channel), TAG, "Could not create RMT channel for %s", string->name);
     ESP_RETURN_ON_ERROR(rmt_new_bytes_encoder(&encoder_configuration, &string->byte_encoder), TAG, "Could not create RMT encoder for %s", string->name);
     return rmt_enable(string->transmit_channel);
+}
+
+static esp_err_t initialize_onboard_led(void)
+{
+    // The ESP32-S3 has four RMT (Remote Control Transceiver) transmit
+    // channels, and the four external strings use all of them. SPI (Serial
+    // Peripheral Interface) drives the single onboard WS2812 without taking a
+    // channel away from an external string.
+    const spi_bus_config_t bus_configuration = {
+        .mosi_io_num = ONBOARD_ADDRESSABLE_LED_GPIO,
+        .miso_io_num = -1,
+        .sclk_io_num = -1,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 16,
+    };
+    const spi_device_interface_config_t device_configuration = {
+        .clock_speed_hz = ONBOARD_LED_SPI_CLOCK_HZ,
+        .mode = 0,
+        .spics_io_num = -1,
+        .queue_size = 1,
+    };
+    ESP_RETURN_ON_ERROR(spi_bus_initialize(SPI2_HOST, &bus_configuration, SPI_DMA_DISABLED), TAG, "Could not initialize onboard LED SPI bus");
+    return spi_bus_add_device(SPI2_HOST, &device_configuration, &onboard_led_spi_device);
+}
+
+static esp_err_t transmit_onboard_settings(void)
+{
+    // This board's onboard addressable LED expects red-green-blue wire order,
+    // unlike the green-red-blue order used by the external strings.
+    const uint8_t red_green_blue[] = {
+        (uint8_t)(((uint16_t)onboard_led_settings.red * onboard_led_settings.intensity_percent) / 100),
+        (uint8_t)(((uint16_t)onboard_led_settings.green * onboard_led_settings.intensity_percent) / 100),
+        (uint8_t)(((uint16_t)onboard_led_settings.blue * onboard_led_settings.intensity_percent) / 100),
+    };
+    uint8_t encoded_data[9] = {0};
+    size_t encoded_bit_index = 0;
+
+    // Each WS2812 data bit is expanded into three SPI bits. At 2.4 MHz, 100
+    // represents a zero and 110 represents a one with the required waveform.
+    for (size_t byte_index = 0; byte_index < sizeof(red_green_blue); byte_index++) {
+        for (int source_bit = 7; source_bit >= 0; source_bit--) {
+            const uint8_t encoded_bits = (red_green_blue[byte_index] & (1U << source_bit)) ? 0x6 : 0x4;
+            for (int encoded_bit = 2; encoded_bit >= 0; encoded_bit--) {
+                if ((encoded_bits & (1U << encoded_bit)) != 0) {
+                    encoded_data[encoded_bit_index / 8] |= 1U << (7 - (encoded_bit_index % 8));
+                }
+                encoded_bit_index++;
+            }
+        }
+    }
+
+    spi_transaction_t transaction = {
+        .length = sizeof(encoded_data) * 8,
+        .tx_buffer = encoded_data,
+    };
+    ESP_RETURN_ON_ERROR(spi_device_transmit(onboard_led_spi_device, &transaction), TAG, "Could not update onboard LED");
+    vTaskDelay(pdMS_TO_TICKS(1));
+    return ESP_OK;
 }
 
 static esp_err_t transmit_settings(external_led_string_t *string, size_t transmit_length)
@@ -135,10 +202,20 @@ static void load_saved_settings(void)
             ESP_LOGW(TAG, "Ignoring invalid saved settings for string %u", (unsigned)(index + 1));
         }
     }
+    led_string_settings_t saved_onboard_settings = {0};
+    size_t saved_onboard_size = sizeof(saved_onboard_settings);
+    result = nvs_get_blob(storage, "onboard", &saved_onboard_settings, &saved_onboard_size);
+    if (result == ESP_OK && saved_onboard_size == sizeof(saved_onboard_settings) &&
+        settings_are_valid(&saved_onboard_settings) &&
+        saved_onboard_settings.physical_length == 1 && saved_onboard_settings.control_length == 1) {
+        onboard_led_settings = saved_onboard_settings;
+    } else if (result != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Ignoring invalid saved settings for onboard LED");
+    }
     nvs_close(storage);
 }
 
-static void refresh_external_strings(void *task_parameter)
+static void refresh_led_outputs(void *task_parameter)
 {
     (void)task_parameter;
     TickType_t next_refresh_time = xTaskGetTickCount();
@@ -160,6 +237,10 @@ static void refresh_external_strings(void *task_parameter)
                 ESP_LOGE(TAG, "Could not refresh string %u: %s", (unsigned)(index + 1), esp_err_to_name(result));
             }
         }
+        const esp_err_t onboard_result = transmit_onboard_settings();
+        if (onboard_result != ESP_OK) {
+            ESP_LOGE(TAG, "Could not refresh onboard LED: %s", esp_err_to_name(onboard_result));
+        }
         xSemaphoreGive(state_mutex);
     }
 }
@@ -169,12 +250,14 @@ esp_err_t led_controller_start(void)
     state_mutex = xSemaphoreCreateMutex();
     ESP_RETURN_ON_FALSE(state_mutex != NULL, ESP_ERR_NO_MEM, TAG, "Could not create LED state mutex");
     load_saved_settings();
+    ESP_RETURN_ON_ERROR(initialize_onboard_led(), TAG, "Could not initialize onboard LED");
+    ESP_RETURN_ON_ERROR(transmit_onboard_settings(), TAG, "Could not apply saved settings to onboard LED");
     for (size_t index = 0; index < EXTERNAL_LED_STRING_COUNT; index++) {
         ESP_RETURN_ON_ERROR(initialize_external_string(&external_led_strings[index]), TAG, "Could not initialize external string %u", (unsigned)(index + 1));
         ESP_RETURN_ON_ERROR(transmit_settings(&external_led_strings[index], external_led_strings[index].settings.physical_length), TAG, "Could not apply saved settings to string %u", (unsigned)(index + 1));
     }
     ESP_RETURN_ON_FALSE(
-        xTaskCreate(refresh_external_strings, "refresh-led-strings", LED_REFRESH_TASK_STACK_SIZE, NULL, LED_REFRESH_TASK_PRIORITY, NULL) == pdPASS,
+        xTaskCreate(refresh_led_outputs, "refresh-led-outputs", LED_REFRESH_TASK_STACK_SIZE, NULL, LED_REFRESH_TASK_PRIORITY, NULL) == pdPASS,
         ESP_ERR_NO_MEM,
         TAG,
         "Could not create LED refresh task"
@@ -198,6 +281,22 @@ esp_err_t led_controller_preview_string(size_t string_index, const led_string_se
     return result;
 }
 
+esp_err_t led_controller_preview_onboard(const led_string_settings_t *settings)
+{
+    ESP_RETURN_ON_FALSE(
+        settings != NULL && settings_are_valid(settings) &&
+        settings->physical_length == 1 && settings->control_length == 1,
+        ESP_ERR_INVALID_ARG,
+        TAG,
+        "Invalid onboard LED settings"
+    );
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    onboard_led_settings = *settings;
+    const esp_err_t result = transmit_onboard_settings();
+    xSemaphoreGive(state_mutex);
+    return result;
+}
+
 esp_err_t led_controller_save_settings(void)
 {
     nvs_handle_t storage;
@@ -208,6 +307,9 @@ esp_err_t led_controller_save_settings(void)
         char key[8];
         snprintf(key, sizeof(key), "string%u", (unsigned)(index + 1));
         result = nvs_set_blob(storage, key, &external_led_strings[index].settings, sizeof(external_led_strings[index].settings));
+    }
+    if (result == ESP_OK) {
+        result = nvs_set_blob(storage, "onboard", &onboard_led_settings, sizeof(onboard_led_settings));
     }
     if (result == ESP_OK) {
         result = nvs_commit(storage);
@@ -223,5 +325,15 @@ void led_controller_get_settings(led_string_settings_t strings[EXTERNAL_LED_STRI
     for (size_t index = 0; index < EXTERNAL_LED_STRING_COUNT; index++) {
         strings[index] = external_led_strings[index].settings;
     }
+    xSemaphoreGive(state_mutex);
+}
+
+void led_controller_get_onboard_settings(led_string_settings_t *settings)
+{
+    if (settings == NULL) {
+        return;
+    }
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    *settings = onboard_led_settings;
     xSemaphoreGive(state_mutex);
 }
