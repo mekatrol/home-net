@@ -10,11 +10,15 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "nvs.h"
 #include "sdkconfig.h"
 
 #define ADDRESSABLE_LED_RMT_RESOLUTION_HZ 10000000
 #define ADDRESSABLE_LED_RMT_MEMORY_SYMBOLS 48
+#define LED_REFRESH_INTERVAL_MILLISECONDS 500
+#define LED_REFRESH_TASK_PRIORITY 4
+#define LED_REFRESH_TASK_STACK_SIZE 3072
 #define SETTINGS_NAMESPACE "led-strings"
 #define SETTINGS_VERSION 1
 
@@ -134,6 +138,32 @@ static void load_saved_settings(void)
     nvs_close(storage);
 }
 
+static void refresh_external_strings(void *task_parameter)
+{
+    (void)task_parameter;
+    TickType_t next_refresh_time = xTaskGetTickCount();
+
+    while (true) {
+        // WS2812 pixels retain their last received colour only while they stay
+        // powered. Re-sending the complete frames lets a string recover within
+        // about 500 ms when its power is switched off and back on, even though
+        // none of the controller settings changed.
+        vTaskDelayUntil(&next_refresh_time, pdMS_TO_TICKS(LED_REFRESH_INTERVAL_MILLISECONDS));
+
+        xSemaphoreTake(state_mutex, portMAX_DELAY);
+        for (size_t index = 0; index < EXTERNAL_LED_STRING_COUNT; index++) {
+            const esp_err_t result = transmit_settings(
+                &external_led_strings[index],
+                external_led_strings[index].settings.physical_length
+            );
+            if (result != ESP_OK) {
+                ESP_LOGE(TAG, "Could not refresh string %u: %s", (unsigned)(index + 1), esp_err_to_name(result));
+            }
+        }
+        xSemaphoreGive(state_mutex);
+    }
+}
+
 esp_err_t led_controller_start(void)
 {
     state_mutex = xSemaphoreCreateMutex();
@@ -143,6 +173,12 @@ esp_err_t led_controller_start(void)
         ESP_RETURN_ON_ERROR(initialize_external_string(&external_led_strings[index]), TAG, "Could not initialize external string %u", (unsigned)(index + 1));
         ESP_RETURN_ON_ERROR(transmit_settings(&external_led_strings[index], external_led_strings[index].settings.physical_length), TAG, "Could not apply saved settings to string %u", (unsigned)(index + 1));
     }
+    ESP_RETURN_ON_FALSE(
+        xTaskCreate(refresh_external_strings, "refresh-led-strings", LED_REFRESH_TASK_STACK_SIZE, NULL, LED_REFRESH_TASK_PRIORITY, NULL) == pdPASS,
+        ESP_ERR_NO_MEM,
+        TAG,
+        "Could not create LED refresh task"
+    );
     return ESP_OK;
 }
 

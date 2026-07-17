@@ -27,8 +27,9 @@ The supplied board is configured for:
 
 - Core 0 runs ESP-IDF's Wi-Fi driver and the controller's HTTP server.
 - Four Remote Control Transceiver (RMT) transmit channels generate the four
-  external LED waveforms in hardware whenever a preview is applied or saved
-  settings are restored at startup.
+  external LED waveforms in hardware. Frames are applied immediately for a
+  preview or at startup, then refreshed about every 500 ms so an LED string
+  recovers automatically if its power is switched off and back on.
 
 RMT means that the processor does not have to bit-bang timing-sensitive LED
 data. Each output has its own settings and frame, so strings do not need to have
