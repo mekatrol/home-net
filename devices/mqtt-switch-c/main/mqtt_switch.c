@@ -224,8 +224,8 @@ static void mqtt_inactivity_watchdog_task(void *arg)
                  * flush over serial before esp_restart() resets the CPU.
                  */
                 ESP_LOGE(TAG, "MQTT inactivity timeout, restarting");
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                esp_restart();
+                // vTaskDelay(pdMS_TO_TICKS(1000));
+                // esp_restart();
             }
         }
 
