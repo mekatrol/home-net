@@ -30,13 +30,13 @@ menu "LED controller"
 
     config LED_CONTROLLER_STRING_1_GPIO
         int "String 1 GPIO"
-        default 4 if LED_CONTROLLER_BOARD_ESP32_S3_ZERO
-        default 3 if LED_CONTROLLER_BOARD_ESP32_C6_ZERO
+        default 3 if LED_CONTROLLER_BOARD_ESP32_S3_ZERO
+        default 2 if LED_CONTROLLER_BOARD_ESP32_C6_ZERO
         range 0 46
     config LED_CONTROLLER_STRING_2_GPIO
         int "String 2 GPIO"
-        default 3 if LED_CONTROLLER_BOARD_ESP32_S3_ZERO
-        default 2 if LED_CONTROLLER_BOARD_ESP32_C6_ZERO
+        default 4 if LED_CONTROLLER_BOARD_ESP32_S3_ZERO
+        default 3 if LED_CONTROLLER_BOARD_ESP32_C6_ZERO
         range 0 46
     config LED_CONTROLLER_STRING_3_GPIO
         int "String 3 GPIO"
