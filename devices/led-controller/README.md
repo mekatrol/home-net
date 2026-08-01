@@ -1,19 +1,23 @@
 # LED Controller
 
-ESP-IDF C project for an ESP32-S3FH4R2 development board. The firmware provides
+ESP-IDF C project for the footprint-compatible Waveshare ESP32-S3-Zero and
+ESP32-C6-Zero development boards. The firmware provides
 a Wi-Fi controller for up to four independent external addressable LED strings.
 The onboard addressable LED can also be controlled. Each external string's
 solid colour, intensity, physical length, and control length are configured
 directly through the controller's local web interface. No application server is
 required.
 
-The supplied board is configured for:
+Supported boards are:
 
-- ESP32-S3 target
-- 4 MB flash
-- 2 MB quad SPI PSRAM
-- onboard WS2812 data on GPIO 21
-- USB Serial/JTAG console
+- **Waveshare ESP32-S3-Zero (WS-25081):** ESP32-S3 target, 4 MB flash,
+  2 MB quad SPI PSRAM, and onboard WS2812 data on GPIO 21.
+- **Waveshare ESP32-C6-Zero (WS-27035):** ESP32-C6 target, 4 MB flash, no
+  external PSRAM, and onboard WS2812 data on GPIO 8.
+
+Both use the USB Serial/JTAG console. The external LED outputs use the same
+physical carrier-board pads, which map to GPIO 4, 3, 5, and 6 on the S3 and
+GPIO 3, 2, 4, and 5 on the C6.
 
 ## VS Code setup
 
@@ -21,16 +25,20 @@ The supplied board is configured for:
 2. Open `devices/led-controller` as the VS Code folder.
 3. Run `ESP-IDF: Open ESP-IDF Installation Manager` and install ESP-IDF.
 4. Run `ESP-IDF: Select Current ESP-IDF Version`.
-5. Plug in the ESP32-S3 board.
-6. Run `Terminal: Run Task`, then choose `Flash and Monitor`.
+5. Run `Terminal: Run Task`, choose **Set board**, and select the connected
+   board. This also selects the correct ESP-IDF chip target.
+6. Plug in the board.
+7. Run `Terminal: Run Task`, then choose `Flash and Monitor`.
 
 ## Architecture
 
 - Core 0 runs ESP-IDF's Wi-Fi driver and the controller's HTTP server.
-- Four Remote Control Transceiver (RMT) transmit channels generate the four
-  external LED waveforms in hardware. Frames are applied immediately for a
-  preview or at startup, then refreshed about every 500 ms so an LED string
-  recovers automatically if its power is switched off and back on.
+- Remote Control Transceiver (RMT) hardware generates the four external LED
+  waveforms. The outputs are updated serially so all four remain available on
+  the ESP32-C6, which has fewer RMT transmit channels. Frames are applied
+  immediately for a preview or at startup, then refreshed about every 500 ms
+  so an LED string recovers automatically if its power is switched off and
+  back on.
 
 RMT means that the processor does not have to bit-bang timing-sensitive LED
 data. Each output has its own settings and frame, so strings do not need to have
@@ -65,8 +73,23 @@ restored.
 Run `ESP-IDF: SDK Configuration editor (menuconfig)` and open **LED controller**
 to set:
 
+- controller board (constrained to the currently selected ESP-IDF target)
 - Wi-Fi SSID and password
-- GPIO for each external LED output (defaults: GPIO 4, 5, 6, and 7)
+- GPIO for each external LED output (S3 defaults: GPIO 4, 3, 5, and 6; C6
+  defaults: GPIO 3, 2, 4, and 5)
+
+To change boards from a terminal, run one of:
+
+```sh
+scripts/esp-idf-task.sh . set-board esp32-s3-zero
+scripts/esp-idf-task.sh . set-board esp32-c6-zero
+```
+
+Changing boards regenerates `sdkconfig`; the Set board task preserves the Wi-Fi
+SSID and password across that operation. Target-specific checked-in defaults
+enable PSRAM only for the ESP32-S3-Zero. The selection is remembered locally,
+and each target uses its own build directory (`build-esp32s3` or
+`build-esp32c6`) so a Flash task cannot reuse an image built for the other chip.
 
 The firmware cannot expose its web interface until the Wi-Fi SSID is set. If it
 is left empty, the serial monitor reports the missing setting without entering
@@ -90,7 +113,7 @@ for the string lengths and brightness limit.
 
 The terminal tasks match the workflow used by `mqtt-switch-c`:
 
-- `Set target`
+- `Set board`
 - `Clean`
 - `Build`
 - `Flash`
@@ -116,9 +139,10 @@ connection did not:
 
 ## Board pin note
 
-The ESP32-S3 version of this board uses GPIO 21 for its onboard WS2812. The
-visually similar ESP32-C3 version uses GPIO 10, while other ESP32-S3 mini boards
-may use GPIO 48. If the firmware flashes and logs colors but the LED remains
-dark, verify the exact board revision and inspect the LED solder bridge. Some
-board revisions leave that bridge open so GPIO 21 remains available on the edge
-connector; it must be bridged for the onboard LED to receive the data signal.
+The ESP32-S3-Zero uses GPIO 21 for its onboard WS2812; the ESP32-C6-Zero uses
+GPIO 8. The visually similar ESP32-C3 version uses GPIO 10, while other ESP32-S3
+mini boards may use GPIO 48, and those variants are not configured here. If the
+firmware flashes and logs colours but the LED remains dark, verify the exact
+board revision and inspect its LED solder bridge. Some revisions leave that
+bridge open so the GPIO remains available on the edge connector; it must be
+bridged for the onboard LED to receive the data signal.

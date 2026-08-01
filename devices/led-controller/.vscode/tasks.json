@@ -2,10 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Set target",
+      "label": "Set board",
       "type": "shell",
       "command": "${workspaceFolder}/scripts/esp-idf-task.sh",
-      "args": ["${workspaceFolder}", "set-target"],
+      "args": ["${workspaceFolder}", "set-board", "${input:controllerBoard}"],
       "problemMatcher": []
     },
     {
@@ -53,11 +53,17 @@
   ],
   "inputs": [
     {
+      "id": "controllerBoard",
+      "type": "pickString",
+      "description": "Controller board",
+      "options": ["esp32-s3-zero", "esp32-c6-zero"],
+      "default": "esp32-s3-zero"
+    },
+    {
       "id": "serialPort",
       "type": "promptString",
-      "description": "ESP32-S3 serial port",
+      "description": "ESP32 serial port",
       "default": "/dev/ttyACM0"
     }
   ]
 }
-

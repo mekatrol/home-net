@@ -17,7 +17,13 @@
 
 #define ADDRESSABLE_LED_RMT_RESOLUTION_HZ 10000000
 #define ADDRESSABLE_LED_RMT_MEMORY_SYMBOLS 48
+#if CONFIG_LED_CONTROLLER_BOARD_ESP32_S3_ZERO
 #define ONBOARD_ADDRESSABLE_LED_GPIO 21
+#elif CONFIG_LED_CONTROLLER_BOARD_ESP32_C6_ZERO
+#define ONBOARD_ADDRESSABLE_LED_GPIO 8
+#else
+#error "Select a supported controller board"
+#endif
 #define ONBOARD_LED_SPI_CLOCK_HZ 2400000
 #define LED_REFRESH_INTERVAL_MILLISECONDS 500
 #define LED_REFRESH_TASK_PRIORITY 4
@@ -31,7 +37,9 @@ typedef struct {
     const char *name;
     int gpio_number;
     led_string_settings_t settings;
+#if CONFIG_LED_CONTROLLER_BOARD_ESP32_S3_ZERO
     rmt_channel_handle_t transmit_channel;
+#endif
     rmt_encoder_handle_t byte_encoder;
 } external_led_string_t;
 
@@ -58,6 +66,7 @@ static bool settings_are_valid(const led_string_settings_t *settings)
 
 static esp_err_t initialize_external_string(external_led_string_t *string)
 {
+#if CONFIG_LED_CONTROLLER_BOARD_ESP32_S3_ZERO
     const rmt_tx_channel_config_t channel_configuration = {
         .gpio_num = string->gpio_number,
         .clk_src = RMT_CLK_SRC_DEFAULT,
@@ -69,23 +78,28 @@ static esp_err_t initialize_external_string(external_led_string_t *string)
         .flags.allow_pd = false,
         .flags.init_level = 0,
     };
+#endif
     const rmt_bytes_encoder_config_t encoder_configuration = {
         .bit0 = {.level0 = 1, .duration0 = 3, .level1 = 0, .duration1 = 9},
         .bit1 = {.level0 = 1, .duration0 = 9, .level1 = 0, .duration1 = 3},
         .flags.msb_first = true,
     };
 
+#if CONFIG_LED_CONTROLLER_BOARD_ESP32_S3_ZERO
     ESP_RETURN_ON_ERROR(rmt_new_tx_channel(&channel_configuration, &string->transmit_channel), TAG, "Could not create RMT channel for %s", string->name);
+#endif
     ESP_RETURN_ON_ERROR(rmt_new_bytes_encoder(&encoder_configuration, &string->byte_encoder), TAG, "Could not create RMT encoder for %s", string->name);
+#if CONFIG_LED_CONTROLLER_BOARD_ESP32_S3_ZERO
     return rmt_enable(string->transmit_channel);
+#else
+    return ESP_OK;
+#endif
 }
 
 static esp_err_t initialize_onboard_led(void)
 {
-    // The ESP32-S3 has four RMT (Remote Control Transceiver) transmit
-    // channels, and the four external strings use all of them. SPI (Serial
-    // Peripheral Interface) drives the single onboard WS2812 without taking a
-    // channel away from an external string.
+    // SPI (Serial Peripheral Interface) drives the single onboard WS2812
+    // without taking an RMT channel away from the external strings.
     const spi_bus_config_t bus_configuration = {
         .mosi_io_num = ONBOARD_ADDRESSABLE_LED_GPIO,
         .miso_io_num = -1,
@@ -161,11 +175,50 @@ static esp_err_t transmit_settings(external_led_string_t *string, size_t transmi
     // calloc() deliberately leaves every LED after control_length black. A
     // complete physical-length frame is always sent so LEDs which were lit by
     // an earlier, longer control preview are actively switched off.
+#if CONFIG_LED_CONTROLLER_BOARD_ESP32_C6_ZERO
+    // The ESP32-C6 has only two RMT transmit channels. Outputs are updated
+    // serially, so allocate a channel for the GPIO being updated and release it
+    // afterwards. The ESP32-S3 keeps its original four permanent channels.
+    const rmt_tx_channel_config_t channel_configuration = {
+        .gpio_num = string->gpio_number,
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = ADDRESSABLE_LED_RMT_RESOLUTION_HZ,
+        .mem_block_symbols = ADDRESSABLE_LED_RMT_MEMORY_SYMBOLS,
+        .trans_queue_depth = 1,
+        .flags.invert_out = false,
+        .flags.with_dma = false,
+        .flags.allow_pd = false,
+        .flags.init_level = 0,
+    };
+    rmt_channel_handle_t transmit_channel = NULL;
+    esp_err_t result = rmt_new_tx_channel(&channel_configuration, &transmit_channel);
+    if (result == ESP_OK) {
+        result = rmt_enable(transmit_channel);
+    }
+    const rmt_transmit_config_t transmit_configuration = {.loop_count = 0, .flags.eot_level = 0, .flags.queue_nonblocking = 0};
+    if (result == ESP_OK) {
+        result = rmt_transmit(transmit_channel, string->byte_encoder, frame, transmit_length * 3, &transmit_configuration);
+    }
+    if (result == ESP_OK) {
+        result = rmt_tx_wait_all_done(transmit_channel, portMAX_DELAY);
+    }
+    if (transmit_channel != NULL) {
+        const esp_err_t disable_result = rmt_disable(transmit_channel);
+        if (result == ESP_OK && disable_result != ESP_OK) {
+            result = disable_result;
+        }
+        const esp_err_t delete_result = rmt_del_channel(transmit_channel);
+        if (result == ESP_OK && delete_result != ESP_OK) {
+            result = delete_result;
+        }
+    }
+#else
     const rmt_transmit_config_t transmit_configuration = {.loop_count = 0, .flags.eot_level = 0, .flags.queue_nonblocking = 0};
     esp_err_t result = rmt_transmit(string->transmit_channel, string->byte_encoder, frame, transmit_length * 3, &transmit_configuration);
     if (result == ESP_OK) {
         result = rmt_tx_wait_all_done(string->transmit_channel, portMAX_DELAY);
     }
+#endif
     free(frame);
     return result;
 }
