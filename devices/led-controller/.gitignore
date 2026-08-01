@@ -1,6 +1,0 @@
-build/
-build-*/
-.led-controller-board
-managed_components/
-sdkconfig
-sdkconfig.old
