@@ -222,6 +222,27 @@ awk '
 ' "$vendor_work_file" > "$next_work_file"
 mv "$next_work_file" "$vendor_work_file"
 
+# Force every selectable MK4S print profile to show Supports: None.
+next_work_file="$(mktemp)"
+awk '
+    function finish_target() {
+        if (in_target && !wrote_support) print "support_material = 0"
+    }
+    /^\[/ {
+        finish_target()
+        in_target = ($0 ~ /^\[print:.*@MK4S.*\]$/)
+        wrote_support = 0
+    }
+    in_target && /^support_material[[:space:]]*=/ {
+        if (!wrote_support) print "support_material = 0"
+        wrote_support = 1
+        next
+    }
+    { print }
+    END { finish_target() }
+' "$vendor_work_file" > "$next_work_file"
+mv "$next_work_file" "$vendor_work_file"
+
 next_work_file="$(mktemp)"
 awk '
     /^\[printer_model:MK4SMMU3\]$/ { in_model = 1 }

@@ -10,6 +10,7 @@ PrusaSlicer configuration:
 - Inheriting printer presets that disable binary G-code for every listed printer/nozzle combination.
 - Custom `PLA Low Temp` filament preset.
 - Generated MMU3 0.25 mm copies of every enabled standard MK4S 0.25 mm filament preset.
+- All selectable MK4S print presets default to `Supports: None`.
 
 The standard Prusa presets are supplied and updated by PrusaSlicer. The
 installers set `binary_gcode = 0` directly in the relevant bundled preset
@@ -86,6 +87,8 @@ The bundled standard MK4S profile parents normally exclude multimaterial
 printers. The installers extend those inherited compatibility conditions only
 for the `MK4SMMU3` model with a 0.25 mm nozzle, allowing both the copied
 filaments and the standard MK4S 0.25 mm print settings to be selected.
+The installers also set `support_material = 0` on every selectable `@MK4S`
+print profile so supports remain disabled by default for all MK4S variants.
 
 PrusaSlicer may replace its bundled preset file when its profiles are updated.
 After a PrusaSlicer profile update, close PrusaSlicer and rerun the installer to

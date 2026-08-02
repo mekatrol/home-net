@@ -230,6 +230,44 @@ function Enable-Mmu025ForStandardMk4sProfiles {
     }
 }
 
+function Disable-SupportsForMk4sPrintProfiles {
+    $SectionStarts = @()
+    for ($Index = 0; $Index -lt $VendorLines.Count; $Index++) {
+        if ($VendorLines[$Index] -match '^\[print:.*@MK4S.*\]$') {
+            $SectionStarts += $Index
+        }
+    }
+
+    # Work backwards so inserting into one section does not invalidate the
+    # recorded indexes of sections that still need processing.
+    for ($StartIndex = $SectionStarts.Count - 1; $StartIndex -ge 0; $StartIndex--) {
+        $SectionStart = $SectionStarts[$StartIndex]
+        $SectionEnd = $VendorLines.Count
+        for ($Index = $SectionStart + 1; $Index -lt $VendorLines.Count; $Index++) {
+            if ($VendorLines[$Index].StartsWith("[")) {
+                $SectionEnd = $Index
+                break
+            }
+        }
+
+        $FoundSetting = $false
+        for ($Index = $SectionStart + 1; $Index -lt $SectionEnd; $Index++) {
+            if ($VendorLines[$Index] -match '^support_material\s*=') {
+                $FoundSetting = $true
+                if ($VendorLines[$Index] -ne "support_material = 0") {
+                    $VendorLines[$Index] = "support_material = 0"
+                    $script:VendorChanged = $true
+                }
+                break
+            }
+        }
+        if (-not $FoundSetting) {
+            $VendorLines.Insert($SectionEnd, "support_material = 0")
+            $script:VendorChanged = $true
+        }
+    }
+}
+
 function Disable-BinaryGcodeForVendorPreset {
     param(
         [Parameter(Mandatory = $true)]
@@ -271,6 +309,7 @@ Disable-BinaryGcodeForVendorPreset -PresetName "Original Prusa MK4S 0.6 nozzle"
 Disable-BinaryGcodeForVendorPreset -PresetName "Original Prusa MK4S MMU3 0.4 nozzle"
 Disable-BinaryGcodeForVendorPreset -PresetName "Original Prusa MK4S MMU3 0.6 nozzle"
 Enable-Mmu025ForStandardMk4sProfiles
+Disable-SupportsForMk4sPrintProfiles
 Enable-Mmu025PrinterVariant
 Install-Mmu025VendorPrinter
 
@@ -300,7 +339,11 @@ if (Test-Path -LiteralPath $ShadowPrinter -PathType Leaf) {
 # Remove superseded override files created by an earlier version of this bundle.
 # The current clean-named presets do not contain alias metadata.
 $PrinterDirectory = Join-Path $ConfigDirectory "printer"
-Get-ChildItem -LiteralPath $PrinterDirectory -Filter "*.ini" -File | ForEach-Object {
+$ObsoletePresets = @()
+if (Test-Path -LiteralPath $PrinterDirectory -PathType Container) {
+    $ObsoletePresets = Get-ChildItem -LiteralPath $PrinterDirectory -Filter "*.ini" -File
+}
+$ObsoletePresets | ForEach-Object {
     $HasPrusaAlias = Select-String -LiteralPath $_.FullName -SimpleMatch "alias = Original Prusa" -Quiet
     $DisablesBinaryGcode = Select-String -LiteralPath $_.FullName -SimpleMatch "binary_gcode = 0" -Quiet
     if ($HasPrusaAlias -and $DisablesBinaryGcode) {
